@@ -122,6 +122,30 @@ void Chassis_MoveTo(float left_mm, float right_mm)
 }
 
 /**
+ * @brief  原地旋转指定角度 (位置模式)
+ * @param  degrees  旋转角度 (度), + 为左转(CCW), - 为右转(CW)
+ *
+ * @note   差速解算:
+ *         左轮弧长 = - angle_rad × (wheel_base / 2)   (后退)
+ *         右轮弧长 = + angle_rad × (wheel_base / 2)   (前进)
+ *         内部读取当前规划器绝对位置并叠加目标, 调用 Chassis_MoveTo 执行
+ */
+void Chassis_Rotate(float degrees)
+{
+    float rad    = degrees * 3.14159265359f / 180.0f;
+    float arc_mm = rad * (WHEEL_BASE_MM / 2.0f);
+
+    /* 获取当前规划器绝对位置 (steps → mm) */
+    float steps_per_mm = (float)STEPS_PER_REV / WHEEL_CIRCUMFERENCE_MM;
+    float left_pos_mm  = TrapPlan_GetPosition(&g_planner_left)  / steps_per_mm;
+    float right_pos_mm = TrapPlan_GetPosition(&g_planner_right) / steps_per_mm;
+
+    /* 左轮后退, 右轮前进 → 原地旋转 */
+    Chassis_MoveTo(left_pos_mm  - arc_mm,
+                   right_pos_mm + arc_mm);
+}
+
+/**
  * @brief  1ms 周期调用 — 双模式驱动
  * @note   由 FreeRTOS 软件定时器回调调用
  *

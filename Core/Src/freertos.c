@@ -144,9 +144,8 @@ void StartDefaultTask(void *argument)
   /* ---- 示例: 直行 100mm/s 2秒 → 右转90°/s 1秒 → 停止 ---- */
   Chassis_MoveTo(500.0f, 500.0f);
   osDelay(5000);
-  Chassis_MoveTo(0.0f, 0.0f); /* 停止 */
-  Chassis_SetMotion(0.0f, 1.57f);  // 角速度 π/2 rad/s ≈ 90°/s
-  osDelay(1000);                     // 转 1 秒 ≈ 90°
+  Chassis_Rotate(90.0f);
+  osDelay(1000);
   Chassis_Stop();
 ; /* 右转90°/s */
   osDelay(2000);

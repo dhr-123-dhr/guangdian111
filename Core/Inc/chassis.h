@@ -1,4 +1,4 @@
-#ifndef __CHASSIS_H__
+	#ifndef __CHASSIS_H__
 #define __CHASSIS_H__
 
 #include "motor.h"
@@ -63,6 +63,20 @@ void Chassis_Stop(void);
  *         规划器由 Chassis_Update 每 1ms 驱动, 自动完成加减速。
  */
 void Chassis_MoveTo(float left_mm, float right_mm);
+
+/**
+ * @brief  原地旋转指定角度 (位置模式)
+ * @param  degrees  旋转角度 (度), + 为左转(CCW), - 为右转(CW)
+ *
+ * @note   差速解算:
+ *         弧长 = angle_rad × (wheel_base / 2)
+ *         左轮后退 arc_mm, 右轮前进 arc_mm
+ *         内部自动获取当前规划器位置并叠加目标, 调用 Chassis_MoveTo 执行
+ *
+ *         例: Chassis_Rotate(90.0f) → 原地左转 90°
+ *              Chassis_Rotate(-90.0f) → 原地右转 90°
+ */
+void Chassis_Rotate(float degrees);
 
 /**
  * @brief  1ms 周期调用 — 更新梯形加减速状态机
