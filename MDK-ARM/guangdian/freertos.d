@@ -10,6 +10,7 @@ guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/A
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
+guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h
 guangdian\freertos.o: ../Core/Inc/main.h
 guangdian\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h
 guangdian\freertos.o: ../Core/Inc/stm32f4xx_hal_conf.h
@@ -44,3 +45,5 @@ guangdian\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 guangdian\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os.h
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h
+guangdian\freertos.o: ../Core/Inc/chassis.h
+guangdian\freertos.o: ../Core/Inc/motor.h

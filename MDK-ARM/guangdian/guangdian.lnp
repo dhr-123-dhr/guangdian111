@@ -11,6 +11,8 @@
 "guangdian\stm32f4xx_it.o"
 "guangdian\stm32f4xx_hal_msp.o"
 "guangdian\stm32f4xx_hal_timebase_tim.o"
+"guangdian\chassis.o"
+"guangdian\motor.o"
 "guangdian\stm32f4xx_hal_tim.o"
 "guangdian\stm32f4xx_hal_tim_ex.o"
 "guangdian\stm32f4xx_hal_rcc.o"
