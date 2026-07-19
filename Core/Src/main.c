@@ -82,7 +82,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+HAL_Delay(1000);  /* 等待电源稳定, 避免 I2C 总线异常 */
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -208,15 +208,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   * @param  htim : TIM handle
   * @retval None
   */
-void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  if (htim->Instance == TIM2) {
-    Motor_StepIRQHandler(&g_motor_left);
-  }
-  else if (htim->Instance == TIM3) {
-    Motor_StepIRQHandler(&g_motor_right);
-  }
-}
 
 /**
   * @brief  This function is executed in case of error occurrence.

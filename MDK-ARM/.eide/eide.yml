@@ -16,7 +16,8 @@ virtualFolder:
             - path: startup_stm32f407xx.s
           folders: []
         - name: User
-          files: []
+          files:
+            - path: ../Core/Src/trap_plan.c
           folders:
             - name: Core
               files:

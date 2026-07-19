@@ -34,5 +34,16 @@ guangdian\motor.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 guangdian\motor.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 guangdian\motor.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 guangdian\motor.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
+guangdian\motor.o: ../Core/Inc/tim.h
 guangdian\motor.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
 guangdian\motor.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+guangdian\motor.o: ../Core/Inc/FreeRTOSConfig.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+guangdian\motor.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h

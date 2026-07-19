@@ -11,7 +11,7 @@
   *
   * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
+  * If no LICENSE f	ile comes with this software, it is provided AS-IS.
   *
   ******************************************************************************
   */
@@ -142,16 +142,18 @@ void StartDefaultTask(void *argument)
   Chassis_Init();
 
   /* ---- 示例: 直行 100mm/s 2秒 → 右转90°/s 1秒 → 停止 ---- */
-  Chassis_SetMotion(100.0f, 0.0f);
-  // osDelay(2000);
-  // Chassis_SetMotion(0.0f, 1.57f); /* 右转 */
-  // osDelay(1000);
+  Chassis_MoveTo(500.0f, 500.0f);
+  osDelay(5000);
+  Chassis_MoveTo(0.0f, 0.0f); /* 停止 */
+  Chassis_SetMotion(0.0f, 1.57f);  // 角速度 π/2 rad/s ≈ 90°/s
+  osDelay(1000);                     // 转 1 秒 ≈ 90°
   Chassis_Stop();
-
+; /* 右转90°/s */
+  osDelay(2000);
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(10);
   }
   /* USER CODE END StartDefaultTask */
 }
