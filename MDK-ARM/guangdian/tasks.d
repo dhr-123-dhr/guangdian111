@@ -1,0 +1,16 @@
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c
+guangdian\tasks.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
+guangdian\tasks.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+guangdian\tasks.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stddef.h
+guangdian\tasks.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+guangdian\tasks.o: ../Core/Inc/FreeRTOSConfig.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h
+guangdian\tasks.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/stack_macros.h
