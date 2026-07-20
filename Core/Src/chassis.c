@@ -1,205 +1,269 @@
 #include "chassis.h"
-#include <math.h>
+#include "mpu6050.h"
 #include "tim.h"
-
-/* ---- 内部变量 ---- */
-static float g_gyro_angular_speed = 0.0f;  /* 陀螺仪角速度 (rad/s), 闭环预留 */
-static float g_target_left_mm_s  = 0.0f;   /* 左轮目标线速度 (mm/s) */
-static float g_target_right_mm_s = 0.0f;   /* 右轮目标线速度 (mm/s) */
-
-/* ---- 梯形规划器实例 ---- */
-static TrapezoidPlanner_t g_planner_left;
-static TrapezoidPlanner_t g_planner_right;
-
-/* ---- 模式标志: 0=速度模式, 1=位置模式 ---- */
-static uint8_t g_position_mode = 0;
-
-/**
- * @brief  限幅
- */
-static float clampf(float val, float min, float max)
-{
-    if (val > max) return max;
-    if (val < min) return min;
-    return val;
-}
+#include <math.h>
+#include <string.h>
 
 /* ================================================================
- *  公 共 接 口
+ *  辅 助 宏
+ * ================================================================
+ */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
+
+#define DEG2RAD(d)  ((d) * 0.01745329252f)
+#define RAD2DEG(r)  ((r) * 57.2957795131f)
+
+#define CLAMP(v, lo, hi)  (((v) < (lo)) ? (lo) : ((v) > (hi)) ? (hi) : (v))
+
+/* mm <-> steps 换算 */
+#define MM2STEPS(mm)     ((mm) * (float)STEPS_PER_REV / WHEEL_CIRCUMFERENCE_MM)
+#define STEPS2MM(steps)  ((steps) * WHEEL_CIRCUMFERENCE_MM / (float)STEPS_PER_REV)
+
+/* ================================================================
+ *  内 部 状 态
  * ================================================================
  */
 
+/* ---- 两个梯形规划器 ---- */
+static TrapezoidPlanner_t g_trans_planner;   /* 平移规划器: current_pos 单位 steps */
+static TrapezoidPlanner_t g_rot_planner;     /* 旋转规划器: current_pos 单位 rad (以 steps 形式存储, 量纲统一) */
+
+/* ---- 航向PID ---- */
+static float g_heading_target_rad = 0.0f;    /* 目标航向角 (rad) */
+static float g_heading_integral   = 0.0f;    /* PI 积分项 */
+static uint8_t g_heading_locked   = 0;       /* 1=航向锁定生效 */
+
+/* ---- 陀螺仪数据缓存 ---- */
+static float g_gyro_angular_rad_s = 0.0f;    /* 当前 Z 轴角速度 (rad/s) */
+static float g_gyro_angle_z_rad   = 0.0f;    /* 当前 Z 轴累积角度 (rad) */
+
+/* ---- 保持 Chassis_SetGyroAngularSpeed 的后向兼容 ---- */
+/* 已由 Chassis_SetGyroData 替代, 保留旧接口兼容 freertos.c 旧调用 */
+
+/* ================================================================
+ *  初 始 化
+ * ================================================================
+ */
 void Chassis_Init(void)
 {
-    /* ---- 将用户友好的 RPM 参数换算为 steps/s 和 steps/s² ---- */
-    float max_speed = MOTOR_MAX_SPEED_RPM * (float)STEPS_PER_REV / 60.0f;
-    float max_accel = MOTOR_ACCEL_RPM_S * (float)STEPS_PER_REV / 60.0f;
-    float min_speed = MIN_SPEED_STEPS_S;  /* 由 MOTOR_MIN_SPEED_RPM 自动换算 */
-
-    /* ---- 电机A: 左轮 ---- */
-    /* STP: PA5 = TIM2_CH1, DIR: PA7  (TIM2 是通用定时器, is_advanced_tim=0) */
-    Motor_Init(&g_motor_left, &htim2, TIM_CHANNEL_1,
+    /* ---- 电机层初始化 ---- */
+    /* 通过 Stepper_SetWheelSpeed 设置目标速度: mm/s 自动换算为 steps/s */
+    Motor_Init(&g_motor_left,  &htim2, TIM_CHANNEL_1,
                GPIOA, GPIO_PIN_7,
-               max_speed, max_accel, 0);
-
-    /* ---- 电机B: 右轮 ---- */
-    /* STP: PA6 = TIM3_CH1, DIR: PC4  (TIM3 是通用定时器, is_advanced_tim=0) */
+               MAX_SPEED_STEPS_S, MAX_ACCEL_STEPS_S2, 0);
     Motor_Init(&g_motor_right, &htim3, TIM_CHANNEL_1,
                GPIOC, GPIO_PIN_4,
-               max_speed, max_accel, 0);
+               MAX_SPEED_STEPS_S, MAX_ACCEL_STEPS_S2, 0);
 
-    /* ---- 梯形规划器初始化 ---- */
-    TrapPlan_Init(&g_planner_left,  max_speed, min_speed, max_accel);
-    TrapPlan_Init(&g_planner_right, max_speed, min_speed, max_accel);
+    /* ---- 平移规划器 ---- */
+    TrapPlan_Init(&g_trans_planner,
+                  MAX_SPEED_STEPS_S, MIN_SPEED_STEPS_S, MAX_ACCEL_STEPS_S2);
+
+    /* ---- 旋转规划器 ★新 ---- */
+    /* rot_planner 的"位置" 单位是 rad, 但 trapplan 用 float steps 统一处理。
+     * 这里 max_speed = 最大角速度 rad/s, min_speed = 最小角速度 rad/s,
+     * max_accel = 角加速度 rad/s², 把它们当作虚拟的 "steps/s" 和 "steps/s²" 传入.
+     *
+     * 效果: TrapPlan_Update 输出的"速度"就是 rad/s, "位置"就是 rad. */
+    TrapPlan_Init(&g_rot_planner,
+                  ROT_MAX_SPEED_RAD_S, ROT_MIN_SPEED_RAD_S, ROT_ACCEL_RAD_S2);
+    g_rot_planner.epsilon = 0.0005f;  /* rad 模式: ~0.029°, 支持小角度旋转 */
+
+    /* ---- 航向PID ---- */
+    g_heading_locked      = 0;
+    g_heading_target_rad  = 0.0f;
+    g_heading_integral    = 0.0f;
+
+    /* ---- 陀螺仪缓存清零 ---- */
+    g_gyro_angular_rad_s = 0.0f;
+    g_gyro_angle_z_rad   = 0.0f;
 }
 
-void Chassis_SetMotion(float linear_mm_s, float angular_rad_s)
+/* ================================================================
+ *  平 移 接 口 — 锁航向
+ * ================================================================
+ */
+void Chassis_MoveTo(float mm)
 {
-    /* ---- 切换到速度模式, 清除位置模式 ---- */
-    g_position_mode = 0;
-    TrapPlan_Stop(&g_planner_left);
-    TrapPlan_Stop(&g_planner_right);
+    float target_steps = MM2STEPS(mm);
 
-    /* ---- 差速运动学解算 ---- */
-    /* V_left  = V_linear - ω × (wheel_base / 2)     */
-    /* V_right = V_linear + ω × (wheel_base / 2)     */
-    float half_base = WHEEL_BASE_MM / 2.0f;
+    /* 停止旋转规划器, 防止平移+旋转并发运动 */
+    TrapPlan_Stop(&g_rot_planner);
 
-    float V_left_mm_s  = linear_mm_s - angular_rad_s * half_base;
-    float V_right_mm_s = linear_mm_s + angular_rad_s * half_base;
+    TrapPlan_SetTarget(&g_trans_planner, target_steps);
 
-    /* 限幅到车轮最大线速度 */
-    float max_wheel_mm_s  = MOTOR_MAX_SPEED_RPM * WHEEL_CIRCUMFERENCE_MM / 60.0f;
-    V_left_mm_s  = clampf(V_left_mm_s,  -max_wheel_mm_s, max_wheel_mm_s);
-    V_right_mm_s = clampf(V_right_mm_s, -max_wheel_mm_s, max_wheel_mm_s);
-
-    /* 仅存储目标 — 实际速度由 Chassis_Update 按 1ms 周期渐进逼近 */
-    g_target_left_mm_s  = V_left_mm_s;
-    g_target_right_mm_s = V_right_mm_s;
-
-    /* TODO: 后续接入陀螺仪闭环时，在此处用 g_gyro_angular_speed 做反馈修正 */
-    (void)g_gyro_angular_speed;
+    /* 若航向锁定开启, 在启动平移时锁当前角度 (使用 rot_planner 坐标系, 避免 gyro 漂移) */
+    if (g_heading_locked) {
+        g_heading_target_rad = g_rot_planner.current_pos;
+        g_heading_integral   = 0.0f;  /* 清积分防止跳变 */
+    }
 }
 
+/* ---- 相对距离平移 ---- */
+void Chassis_Moveto(float mm)
+{
+    float delta_steps = MM2STEPS(mm);
+    float target_steps = g_trans_planner.current_pos + delta_steps;
+
+    /* 停止旋转规划器 */
+    TrapPlan_Stop(&g_rot_planner);
+
+    TrapPlan_SetTarget(&g_trans_planner, target_steps);
+
+    if (g_heading_locked) {
+        g_heading_target_rad = g_rot_planner.current_pos;
+        g_heading_integral   = 0.0f;
+    }
+}
+
+/* ================================================================
+ *  旋 转 接 口 ★新 — rot_planner 梯形曲线驱动
+ * ================================================================
+ */
+void Chassis_RotateTo(float degrees)
+{
+    float delta_rad = DEG2RAD(degrees);
+    float target_rad = g_rot_planner.current_pos + delta_rad;
+
+    TrapPlan_SetTarget(&g_rot_planner, target_rad);
+
+    /* 同步航向目标, 防止 PID 在旋转完成后回弹 */
+    if (g_heading_locked) {
+        g_heading_target_rad = target_rad;
+        g_heading_integral   = 0.0f;
+    }
+}
+
+/* ================================================================
+ *  停 止
+ * ================================================================
+ */
 void Chassis_Stop(void)
 {
-    /* ---- 切换到速度模式并置零目标 ---- */
-    g_position_mode = 0;
-    TrapPlan_Stop(&g_planner_left);
-    TrapPlan_Stop(&g_planner_right);
-    g_target_left_mm_s  = 0.0f;
-    g_target_right_mm_s = 0.0f;
+    /* 停止两个规划器 */
+    TrapPlan_Stop(&g_trans_planner);
+    TrapPlan_Stop(&g_rot_planner);
 
-    /* 立即触发一次 ramp-down: Stepper_SetSpeed(0) 内部 slew limiter
-     * 会从当前速度按 max_accel 逐步减速到零, 不再直接切断 PWM */
+    /* 禁用航向PID, 防止 Stop 后 Update 覆盖电机速度 */
+    g_heading_locked   = 0;
+    g_heading_integral = 0.0f;
+
+    /* 电机缓停 (slew limiter) */
     Stepper_SetSpeed(&g_motor_left,  0.0f);
     Stepper_SetSpeed(&g_motor_right, 0.0f);
 }
 
-/**
- * @brief  绝对位置移动接口 — 使用梯形加减速规划器
- *
- * mm → steps 换算: steps = mm / circumference * steps_per_rev
- *
- * 规划器由 Chassis_Update 每 1ms 驱动:
- *   加速段 → 匀速段 → 减速段 → DONE
- *   短距离自动降级为三角形曲线
+/* ================================================================
+ *  航 向 锁 定 开 关
+ * ================================================================
  */
-void Chassis_MoveTo(float left_mm, float right_mm)
+void Chassis_SetHeadingLock(uint8_t enable)
 {
-    /* ---- 切换到位置模式, 清除速度模式 ---- */
-    g_position_mode = 1;
-    g_target_left_mm_s  = 0.0f;
-    g_target_right_mm_s = 0.0f;
-
-    /* mm → steps */
-    float steps_per_mm = (float)STEPS_PER_REV / WHEEL_CIRCUMFERENCE_MM;
-    float left_steps   = left_mm  * steps_per_mm;
-    float right_steps  = right_mm * steps_per_mm;
-
-    TrapPlan_SetTarget(&g_planner_left,  left_steps);
-    TrapPlan_SetTarget(&g_planner_right, right_steps);
+    g_heading_locked = (enable != 0) ? 1 : 0;
+    g_heading_integral = 0.0f;
 }
 
-/**
- * @brief  原地旋转指定角度 (位置模式)
- * @param  degrees  旋转角度 (度), + 为左转(CCW), - 为右转(CW)
- *
- * @note   差速解算:
- *         左轮弧长 = - angle_rad × (wheel_base / 2)   (后退)
- *         右轮弧长 = + angle_rad × (wheel_base / 2)   (前进)
- *         内部读取当前规划器绝对位置并叠加目标, 调用 Chassis_MoveTo 执行
+/* ================================================================
+ *  传 感 器 注 入
+ * ================================================================
  */
-void Chassis_Rotate(float degrees)
+/* ---- 传感器注入 ---- */
+void Chassis_SetGyroData(float gyro_angular_rad_s, float angle_z_rad)
 {
-    float rad    = degrees * 3.14159265359f / 180.0f;
-    float arc_mm = rad * (WHEEL_BASE_MM / 2.0f);
-
-    /* 获取当前规划器绝对位置 (steps → mm) */
-    float steps_per_mm = (float)STEPS_PER_REV / WHEEL_CIRCUMFERENCE_MM;
-    float left_pos_mm  = TrapPlan_GetPosition(&g_planner_left)  / steps_per_mm;
-    float right_pos_mm = TrapPlan_GetPosition(&g_planner_right) / steps_per_mm;
-
-    /* 左轮后退, 右轮前进 → 原地旋转 */
-    Chassis_MoveTo(left_pos_mm  - arc_mm,
-                   right_pos_mm + arc_mm);
+    g_gyro_angular_rad_s = gyro_angular_rad_s;
+    g_gyro_angle_z_rad   = angle_z_rad;
 }
 
-/**
- * @brief  1ms 周期调用 — 双模式驱动
- * @note   由 FreeRTOS 软件定时器回调调用
- *
- * 位置模式 (g_position_mode=1):
- *   梯形规划器 → TrapPlan_Update → Stepper_SetSpeed
- *   完全走梯形曲线, 精确到达目标位置后停止
- *
- * 速度模式 (g_position_mode=0):
- *   Stepper_SetWheelSpeed → Stepper_SetSpeed
- *   Stepper_SetSpeed 内部有 per-call slew rate limit (1ms 一次),
- *   向目标速度渐进逼近, 无需额外梯形状态机
+/* ---- 状态查询 ---- */
+uint8_t Chassis_IsMoveDone(void)
+{
+    return TrapPlan_IsDone(&g_trans_planner);
+}
+
+uint8_t Chassis_IsRotateDone(void)
+{
+    return TrapPlan_IsDone(&g_rot_planner);
+}
+
+/* ================================================================
+ *  统 一 管 线 更 新  (1ms)
+ * ================================================================
  */
 void Chassis_Update(void)
 {
-    if (g_position_mode) {
-        /* ============================================================
-         *  位置模式: 梯形规划器驱动
-         * ============================================================ */
-        uint8_t left_done  = TrapPlan_IsDone(&g_planner_left);
-        uint8_t right_done = TrapPlan_IsDone(&g_planner_right);
+    float dt = (float)CONTROL_PERIOD_MS * 0.001f;  /* 0.001s */
 
-        if (!left_done) {
-            float speed = TrapPlan_Update(&g_planner_left, 0.001f);
-            Stepper_SetSpeed(&g_motor_left, speed);
-        } else {
-            /* 已到达, 确保速度归零 */
-            Stepper_SetSpeed(&g_motor_left, 0.0f);
-        }
-
-        if (!right_done) {
-            float speed = TrapPlan_Update(&g_planner_right, 0.001f);
-            Stepper_SetSpeed(&g_motor_right, speed);
-        } else {
-            /* 已到达, 确保速度归零 */
-            Stepper_SetSpeed(&g_motor_right, 0.0f);
-        }
-
-        /* 两个都完成后自动切换回速度模式 */
-        if (left_done && right_done) {
-            g_position_mode = 0;
-        }
-    } else {
-        /* ============================================================
-         *  速度模式: 渐进逼近
-         * ============================================================ */
-        /* 每次 1ms 都向目标速度逼近一个小增量 */
-        Stepper_SetWheelSpeed(&g_motor_left,  g_target_left_mm_s,
-                              WHEEL_DIAMETER_MM, STEPS_PER_REV);
-        Stepper_SetWheelSpeed(&g_motor_right, g_target_right_mm_s,
-                              WHEEL_DIAMETER_MM, STEPS_PER_REV);
+    /* --------------------------------------------------------
+     *  第1步: 平移规划器 → v (mm/s)
+     * --------------------------------------------------------
+     */
+    float v_steps = 0.0f;
+    if (!TrapPlan_IsDone(&g_trans_planner)) {
+        v_steps = TrapPlan_Update(&g_trans_planner, dt);
     }
-}
+    /* v_steps 单位: steps/s → 转为 mm/s */
+    float v_mm_s = STEPS2MM(v_steps);
 
-void Chassis_SetGyroAngularSpeed(float gyro_angular_rad_s)
-{
-    g_gyro_angular_speed = gyro_angular_rad_s;
+    /* --------------------------------------------------------
+     *  第2步: 旋转规划器 ★新 → omega_base (rad/s)
+     * --------------------------------------------------------
+     */
+    float omega_base = 0.0f;
+    if (!TrapPlan_IsDone(&g_rot_planner)) {
+        omega_base = TrapPlan_Update(&g_rot_planner, dt);
+    }
+    /* omega_base 单位: rad/s (rot_planner 把虚拟 steps 当 rad 用) */
+
+    /* --------------------------------------------------------
+     *  第3步: 航向角度 PID → delta_omega (弱修正, ±5°/s)
+     * --------------------------------------------------------
+     */
+    float delta_omega = 0.0f;
+    if (g_heading_locked) {
+        float error = g_heading_target_rad - g_gyro_angle_z_rad;
+
+        /* PI 控制器 */
+        g_heading_integral += error * dt;
+        /* 积分限幅 */
+        float i_limit = HEADING_DELTA_LIMIT_RAD_S / (HEADING_KI + 0.001f);
+        g_heading_integral = CLAMP(g_heading_integral, -i_limit, i_limit);
+
+        delta_omega = HEADING_KP * error + HEADING_KI * g_heading_integral;
+
+        /* 限幅 ±5°/s */
+        delta_omega = CLAMP(delta_omega,
+                            -HEADING_DELTA_LIMIT_RAD_S,
+                             HEADING_DELTA_LIMIT_RAD_S);
+    }
+
+    /* --------------------------------------------------------
+     *  第4步: 串级融合 → 差速逆解
+     *
+     *    v_left  = v - omega_total * (base/2)
+     *    v_right = v + omega_total * (base/2)
+     *
+     *  其中 omega_total = omega_base + delta_omega
+     * --------------------------------------------------------
+     */
+    float omega_total = omega_base + delta_omega;
+    float half_base_mm = WHEEL_BASE_MM * 0.5f;
+
+    float v_left_mm_s  = v_mm_s - omega_total * half_base_mm;
+    float v_right_mm_s = v_mm_s + omega_total * half_base_mm;
+
+    /* 限幅到电机能力范围 */
+    float max_wheel_speed_mm_s = (MOTOR_MAX_SPEED_RPM / 60.0f) * WHEEL_CIRCUMFERENCE_MM;
+    v_left_mm_s  = CLAMP(v_left_mm_s,  -max_wheel_speed_mm_s, max_wheel_speed_mm_s);
+    v_right_mm_s = CLAMP(v_right_mm_s, -max_wheel_speed_mm_s, max_wheel_speed_mm_s);
+
+    /* --------------------------------------------------------
+     *  第5步: 输出到电机层
+     * --------------------------------------------------------
+     */
+    Stepper_SetWheelSpeed(&g_motor_left,  v_left_mm_s,
+                          WHEEL_DIAMETER_MM, STEPS_PER_REV);
+    Stepper_SetWheelSpeed(&g_motor_right, v_right_mm_s,
+                          WHEEL_DIAMETER_MM, STEPS_PER_REV);
 }

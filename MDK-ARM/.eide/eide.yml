@@ -34,6 +34,7 @@ virtualFolder:
                 - path: ../Core/Src/stm32f4xx_hal_timebase_tim.c
                 - path: ../Core/Src/chassis.c
                 - path: ../Core/Src/motor.c
+                - path: ../Core/Src/mpu6050.c
               folders: []
     - name: Drivers
       files: []

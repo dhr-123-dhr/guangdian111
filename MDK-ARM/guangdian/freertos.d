@@ -48,3 +48,5 @@ guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/c
 guangdian\freertos.o: ../Core/Inc/chassis.h
 guangdian\freertos.o: ../Core/Inc/motor.h
 guangdian\freertos.o: ../Core/Inc/trap_plan.h
+guangdian\freertos.o: ../Core/Inc/mpu6050.h
+guangdian\freertos.o: ../Core/Inc/i2c.h

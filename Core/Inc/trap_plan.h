@@ -26,6 +26,7 @@ typedef struct {
     float max_speed;    /* 最高速度  (steps/s)            */
     float min_speed;    /* 起步速度  (steps/s), 跳过死区   */
     float max_accel;    /* 最大加速度 (steps/s²)          */
+    float epsilon;      /* 位置判零阈值 (默认 0.5f steps; rad 模式约 0.0005) */
 
     /* ---- 状态 ---- */
     float current_speed; /* 当前速度绝对值  (内部)        */

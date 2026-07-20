@@ -11,7 +11,7 @@
   *
   * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
-  * If no LICENSE f	ile comes with this software, it is provided AS-IS.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
   *
   ******************************************************************************
   */
@@ -24,6 +24,8 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "chassis.h"
+#include "mpu6050.h"
+#include "i2c.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -63,6 +65,14 @@ const osTimerAttr_t controlTimer_attributes = {
   .name = "ControlTimer"
 };
 
+/* 陀螺仪任务句柄 */
+osThreadId_t gyroTaskHandle;
+const osThreadAttr_t gyroTask_attributes = {
+  .name = "gyroTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 
@@ -70,6 +80,7 @@ const osTimerAttr_t controlTimer_attributes = {
 
 /* 1ms 控制定时器回调前向声明 (定义在下方) */
 static void ControlTimerCallback(void *argument);
+void StartGyroTask(void *argument);
 
 
 void StartDefaultTask(void *argument);
@@ -112,7 +123,8 @@ void MX_FREERTOS_Init(void) {
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  /* ---- 陀螺仪任务: 1ms DMA 读取 + 500ms 温度更新 ---- */
+  gyroTaskHandle = osThreadNew(StartGyroTask, NULL, &gyroTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -138,21 +150,15 @@ void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
 
-  /* ---- 初始化底盘 (电机层 + 差速解算) ---- */
+  /* ---- 初始化底盘 ---- */
   Chassis_Init();
+  Chassis_SetHeadingLock(1);
+  /* 等待陀螺仪初始化完成 (MPU6050_Init 约 1s) */
+  osDelay(1500);
 
-  /* ---- 示例: 直行 100mm/s 2秒 → 右转90°/s 1秒 → 停止 ---- */
-  Chassis_MoveTo(500.0f, 500.0f);
-  osDelay(5000);
-  Chassis_Rotate(90.0f);
-  osDelay(1000);
-  Chassis_Stop();
-; /* 右转90°/s */
-  osDelay(2000);
-  /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(10);
+    
   }
   /* USER CODE END StartDefaultTask */
 }
@@ -160,5 +166,33 @@ void StartDefaultTask(void *argument)
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
 
-/* USER CODE END Application */
+/**
+ * @brief  陀螺仪任务: 1ms 周期 DMA 读取 + 500ms 温度更新
+ * @note   优先级高于 defaultTask, 保证传感器数据实时注入
+ */
+void StartGyroTask(void *argument)
+{
+  (void)argument;
 
+  /* 初始化 MPU6050 (含零偏+温度标定, 约 1s) */
+  MPU6050_Init(&hi2c1);
+
+  uint32_t tick = 0;
+
+  for (;;) {
+    /* 启动 DMA 异步读取陀螺仪 6 字节 */
+    MPU6050_ReadGyro_DMA(&hi2c1, &g_mpu6050_data);
+    osDelay(1);  /* 1ms 周期 — DMA 在 540μs 内完成, 回调在 delay 期间触发 */
+
+    /* 注入陀螺仪数据到底盘 (角速度 + 累积角度) */
+    Chassis_SetGyroData(g_mpu6050_data.gyro_z_rad_s, g_mpu6050_data.angle_z_rad);
+
+    /* 每 500ms 更新一次温度并重算温补零偏 */
+    if (++tick >= 500) {
+      tick = 0;
+      MPU6050_UpdateTemperature(&hi2c1);
+    }
+  }
+}
+
+/* USER CODE END Application */

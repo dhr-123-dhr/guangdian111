@@ -41,6 +41,7 @@ void TrapPlan_Init(TrapezoidPlanner_t *tp,
     tp->max_speed = max_speed;
     tp->min_speed = min_speed;
     tp->max_accel = max_accel;
+    tp->epsilon   = 0.5f;      /* steps 模式默认; rad 模式由调用者覆写为 ~0.0005 */
     tp->phase     = TRAP_IDLE;
 }
 
@@ -54,7 +55,7 @@ void TrapPlan_SetTarget(TrapezoidPlanner_t *tp, float absolute_steps)
     float delta = absolute_steps - tp->current_pos;
 
     /* 已经在目标位置 — 直接完成 */
-    if (my_abs(delta) < 0.5f) {
+    if (my_abs(delta) < tp->epsilon) {
         tp->phase         = TRAP_DONE;
         tp->current_speed = 0.0f;
         tp->current_pos   = absolute_steps;
@@ -186,7 +187,7 @@ float TrapPlan_Update(TrapezoidPlanner_t *tp, float dt)
         pos += (float)dir * (v + v_new) * 0.5f * dt;
 
         /* 到达或越过目标 — 钳位 */
-        if (my_abs(target - pos) < 0.5f ||
+        if (my_abs(target - pos) < tp->epsilon ||
             (dir > 0 && pos >= target) ||
             (dir < 0 && pos <= target))
         {

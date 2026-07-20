@@ -36,5 +36,7 @@ guangdian\chassis.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 guangdian\chassis.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 guangdian\chassis.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 guangdian\chassis.o: ../Core/Inc/trap_plan.h
-guangdian\chassis.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
+guangdian\chassis.o: ../Core/Inc/mpu6050.h
 guangdian\chassis.o: ../Core/Inc/tim.h
+guangdian\chassis.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
+guangdian\chassis.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h

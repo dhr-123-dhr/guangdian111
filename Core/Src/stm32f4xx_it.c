@@ -22,6 +22,7 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "mpu6050.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -234,5 +235,16 @@ void TIM3_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+
+/**
+ * @brief  I2C 内存读 DMA 完成回调 — MPU6050 陀螺仪数据处理
+ * @note   重写 HAL 库 __weak 函数, 在 DMA 中断上下文调用
+ */
+void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance == I2C1) {
+        MPU6050_ProcessData(&g_mpu6050_data);
+    }
+}
 
 /* USER CODE END 1 */
