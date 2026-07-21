@@ -180,6 +180,18 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* i2cHandle)
 
     __HAL_LINKDMA(i2cHandle,hdmatx,hdma_i2c1_tx);
 
+    /* I2C1 中断使能 (P2-9: 原缺失, DMA 完成后 HAL 无法触发回调链) */
+    HAL_NVIC_SetPriority(I2C1_EV_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(I2C1_EV_IRQn);
+    HAL_NVIC_SetPriority(I2C1_ER_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(I2C1_ER_IRQn);
+
+    /* DMA 中断使能 (I2C1_RX 的 DMA 完成 → I2C 回调 → 信号量释放) */
+    HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 6, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
+    HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 6, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
+
   /* USER CODE BEGIN I2C1_MspInit 1 */
 
   /* USER CODE END I2C1_MspInit 1 */

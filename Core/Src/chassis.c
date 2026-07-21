@@ -85,21 +85,7 @@ void Chassis_Init(void)
  *  平 移 接 口 — 锁航向
  * ================================================================
  */
-void Chassis_MoveTo(float mm)
-{
-    float target_steps = MM2STEPS(mm);
 
-    /* 停止旋转规划器, 防止平移+旋转并发运动 */
-    TrapPlan_Stop(&g_rot_planner);
-
-    TrapPlan_SetTarget(&g_trans_planner, target_steps);
-
-    /* 若航向锁定开启, 在启动平移时锁当前角度 (使用 rot_planner 坐标系, 避免 gyro 漂移) */
-    if (g_heading_locked) {
-        g_heading_target_rad = g_rot_planner.current_pos;
-        g_heading_integral   = 0.0f;  /* 清积分防止跳变 */
-    }
-}
 
 /* ---- 相对距离平移 ---- */
 void Chassis_Moveto(float mm)
@@ -113,7 +99,7 @@ void Chassis_Moveto(float mm)
     TrapPlan_SetTarget(&g_trans_planner, target_steps);
 
     if (g_heading_locked) {
-        g_heading_target_rad = g_rot_planner.current_pos;
+        g_heading_target_rad = g_gyro_angle_z_rad;   /* 同理, 锁实际传感器角度 */
         g_heading_integral   = 0.0f;
     }
 }
@@ -176,6 +162,12 @@ void Chassis_SetGyroData(float gyro_angular_rad_s, float angle_z_rad)
     g_gyro_angle_z_rad   = angle_z_rad;
 }
 
+/* ---- 简化传感器注入 (信号量架构) ---- */
+void chassis_feed_gyro(float angle_z_rad)
+{
+    g_gyro_angle_z_rad = angle_z_rad;
+}
+
 /* ---- 状态查询 ---- */
 uint8_t Chassis_IsMoveDone(void)
 {
@@ -217,7 +209,7 @@ void Chassis_Update(void)
     /* omega_base 单位: rad/s (rot_planner 把虚拟 steps 当 rad 用) */
 
     /* --------------------------------------------------------
-     *  第3步: 航向角度 PID → delta_omega (弱修正, ±5°/s)
+     *  第3步: 航向角度 PID → delta_omega (修正, ±15°/s)
      * --------------------------------------------------------
      */
     float delta_omega = 0.0f;
@@ -232,7 +224,7 @@ void Chassis_Update(void)
 
         delta_omega = HEADING_KP * error + HEADING_KI * g_heading_integral;
 
-        /* 限幅 ±5°/s */
+        /* 限幅 ±15°/s */
         delta_omega = CLAMP(delta_omega,
                             -HEADING_DELTA_LIMIT_RAD_S,
                              HEADING_DELTA_LIMIT_RAD_S);

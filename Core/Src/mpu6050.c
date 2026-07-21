@@ -15,8 +15,14 @@ float g_gyro_z_bias_dps = 0.0f;
  *  内 部 缓 冲 & 校 准 变 量
  * ================================================================
  */
-static uint8_t  g_rx_buf[6];                /* DMA 接收缓冲区: GYRO_XOUT_H ~ GYRO_ZOUT_L */
+static volatile uint8_t  g_rx_buf[6];       /* DMA 接收缓冲区: GYRO_XOUT_H ~ GYRO_ZOUT_L (volatile: DMA异步写入, CPU在ISR中读取) */
 static uint8_t  g_temp_buf[7];              /* 阻塞读温度用的临时缓冲 */
+
+/* DMA 完成标志 (ISR 置1, 任务查后清零) — 信号量驱动架构使用 */
+static volatile uint8_t g_dma_done = 0;
+
+/* I2C 句柄引用 (信号量架构新接口使用) */
+extern I2C_HandleTypeDef hi2c1;
 
 /* 零偏校准结果 (静止 200 次均值, Init 时标定) */
 static float    g_gyro_z_offset_at_ref = 0.0f;   /* 参考温度下的零偏 (°/s) */
@@ -193,10 +199,7 @@ void MPU6050_ProcessData(MPU6050_Data_t *data)
 
     /* 换算 rad/s */
     data->gyro_z_rad_s = data->gyro_z_dps * 0.01745329252f;   /* × π/180 */
-
-    /* Z 轴角度积分 (dt = 0.001s, 1ms 周期) */
-    data->angle_z_rad += data->gyro_z_rad_s * 0.001f;
-    data->angle_z_deg  = data->angle_z_rad * 57.2957795131f;   /* × 180/π */
+    /* 角度积分由任务层 MPU6050_IntegrateYaw 负责, 避免 ISR 与 Task 双重积分 */
 }
 
 /**
@@ -218,4 +221,130 @@ void MPU6050_UpdateTemperature(I2C_HandleTypeDef *hi2c)
     /* 动态温补零偏: bias(T) = bias(T_ref) + coeff × (T - T_ref) */
     g_gyro_z_bias_dps = g_gyro_z_offset_at_ref
                       + MPU6050_GYRO_TEMP_COEFF * (g_current_temp_c - g_calib_temp_c);
+}
+
+/* ================================================================
+ *  信 号 量 驱 动 架 构 新 接 口
+ * ================================================================
+ */
+
+/**
+ * @brief  上电静止零漂校准 (3σ鲁棒均值)
+ * @param  samples  采集样本数 (建议 ≥ 200)
+ * @note   预热丢弃前50个样本, 剔除超出均值±3σ的异常值后重新取均值
+ *         底盘必须静止, 采样间隔5ms
+ */
+void MPU6050_CalibrateYaw(uint16_t samples)
+{
+    if (samples < 50) return;
+
+    float sum = 0.0f, sum_sq = 0.0f;
+    int   valid = 0;
+    int   total = samples + 50;  /* 额外50个预热丢弃 */
+
+    /* 第一遍: 采集样本计算均值和标准差 */
+    float *buf = (float *)pvPortMalloc(samples * sizeof(float));
+    if (buf == NULL) return;
+
+    for (int i = 0; i < total; i++) {
+        int16_t raw_gyro_z, raw_temp;
+        if (mpu_read_sample(&hi2c1, &raw_gyro_z, &raw_temp) == HAL_OK) {
+            float val = (float)raw_gyro_z / MPU6050_GYRO_SENS_500;
+            if (i >= 50) {   /* 预热丢弃前50个 */
+                buf[valid] = val;
+                sum   += val;
+                sum_sq += val * val;
+                valid++;
+            }
+        }
+        osDelay(5);
+    }
+
+    if (valid < 10) {
+        vPortFree(buf);
+        return;
+    }
+
+    float mean = sum / (float)valid;
+    float var  = sum_sq / (float)valid - mean * mean;
+    float sigma = sqrtf(var > 0.0f ? var : 0.0f);
+    float lo = mean - 3.0f * sigma;
+    float hi = mean + 3.0f * sigma;
+
+    /* 第二遍: 剔除超出3σ的样本, 重新取均值 */
+    float sum_filt = 0.0f;
+    int   cnt_filt = 0;
+    for (int i = 0; i < valid; i++) {
+        if (buf[i] >= lo && buf[i] <= hi) {
+            sum_filt += buf[i];
+            cnt_filt++;
+        }
+    }
+
+    vPortFree(buf);
+
+    if (cnt_filt > 0) {
+        g_gyro_z_offset_at_ref = sum_filt / (float)cnt_filt;
+    } else {
+        g_gyro_z_offset_at_ref = mean;   /* 回退: 全部样本均值 */
+    }
+
+    /* 同时记录校准温度 */
+    g_calib_temp_c = g_current_temp_c;
+    g_gyro_z_bias_dps = g_gyro_z_offset_at_ref;
+}
+
+/**
+ * @brief  获取当前温度 (°C)
+ */
+float MPU6050_GetTempC(void)
+{
+    return g_current_temp_c;
+}
+
+/**
+ * @brief  启动 DMA 异步读取陀螺仪 6 字节 (非阻塞)
+ * @retval HAL_OK / HAL_ERROR
+ */
+HAL_StatusTypeDef MPU6050_StartReadDMA(void)
+{
+    g_dma_done = 0;
+    return HAL_I2C_Mem_Read_DMA(&hi2c1,
+                                (uint16_t)(MPU6050_ADDR << 1),
+                                MPU6050_REG_GYRO_XOUT_H,
+                                I2C_MEMADD_SIZE_8BIT,
+                                g_rx_buf,
+                                6);
+}
+
+/**
+ * @brief  DMA 完成回调 — 解析原始数据 + 置完成标志 (ISR 中调用)
+ */
+void MPU6050_OnDMAComplete(void)
+{
+    /* 在 ISR 中快速解析原始数据到 g_mpu6050_data */
+    MPU6050_ProcessData(&g_mpu6050_data);
+    g_dma_done = 1;
+}
+
+/**
+ * @brief  积分 Yaw 角度 (在任务上下文中调用, 唯一积分入口)
+ * @param  dt  积分时间步长 (s), 由 gyroTask 实际调度间隔计算
+ * @note   ProcessData (ISR) 仅做 raw→物理量换算+零偏补偿, 不做积分
+ */
+void MPU6050_IntegrateYaw(float dt)
+{
+    if (g_dma_done) {
+        g_mpu6050_data.angle_z_rad += g_mpu6050_data.gyro_z_rad_s * dt;
+        g_mpu6050_data.angle_z_deg  = g_mpu6050_data.angle_z_rad * 57.2957795131f;
+        g_dma_done = 0;
+    }
+}
+
+/**
+ * @brief  获取当前 Yaw 角度 (rad)
+ */
+float MPU6050_GetYaw(void)
+{
+    return g_mpu6050_data.angle_z_rad;
 }

@@ -88,9 +88,9 @@ static void motor_write_hw(Motor_t *motor, float steps_per_sec,
     } else {
         /* ---- DIR 引脚 ---- */
         if (direction >= 0)
-            HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_SET);
-        else
             HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_RESET);
+        else
+            HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_SET);
 
         uint32_t arr = speed_to_arr(steps_per_sec);
         uint32_t ccr = arr / 2U;   /* 50% 占空比 */

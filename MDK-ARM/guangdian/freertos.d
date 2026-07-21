@@ -50,3 +50,7 @@ guangdian\freertos.o: ../Core/Inc/motor.h
 guangdian\freertos.o: ../Core/Inc/trap_plan.h
 guangdian\freertos.o: ../Core/Inc/mpu6050.h
 guangdian\freertos.o: ../Core/Inc/i2c.h
+guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h
+guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
+guangdian\freertos.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
+guangdian\freertos.o: ../Core/Inc/usart.h

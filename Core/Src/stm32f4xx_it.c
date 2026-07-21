@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "mpu6050.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -61,6 +63,10 @@ extern DMA_HandleTypeDef hdma_i2c1_tx;
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim14;
+extern I2C_HandleTypeDef hi2c1;
+
+/* 信号量驱动架构: I2C DMA 完成信号量 */
+extern SemaphoreHandle_t g_i2c_dma_sem;
 
 /* USER CODE BEGIN EV */
 
@@ -237,14 +243,45 @@ void TIM3_IRQHandler(void)
 /* USER CODE BEGIN 1 */
 
 /**
- * @brief  I2C 内存读 DMA 完成回调 — MPU6050 陀螺仪数据处理
+ * @brief  I2C 内存读 DMA 完成回调 — MPU6050 陀螺仪数据处理 (信号量驱动架构)
  * @note   重写 HAL 库 __weak 函数, 在 DMA 中断上下文调用
  */
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
     if (hi2c->Instance == I2C1) {
-        MPU6050_ProcessData(&g_mpu6050_data);
+        MPU6050_OnDMAComplete();
+
+        /* 释放 DMA 完成信号量 (ISR 安全版本) */
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        if (g_i2c_dma_sem != NULL) {
+            xSemaphoreGiveFromISR(g_i2c_dma_sem, &xHigherPriorityTaskWoken);
+        }
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
+}
+
+/**
+ * @brief I2C1 错误回调 (总线异常恢复, P2-9)
+ */
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance == I2C1) {
+        /* 复位 I2C1 标志, 清锁存错误, 防止 HAL 状态机卡死在 BUSY */
+        HAL_I2C_DeInit(hi2c);
+        HAL_I2C_Init(hi2c);
+    }
+}
+
+/* ---- I2C1 中断处理函数 (P2-9: 原缺失, 导致 DMA 完成后无 IRQ 触发 HAL 回调链) ---- */
+
+void I2C1_EV_IRQHandler(void)
+{
+    HAL_I2C_EV_IRQHandler(&hi2c1);
+}
+
+void I2C1_ER_IRQHandler(void)
+{
+    HAL_I2C_ER_IRQHandler(&hi2c1);
 }
 
 /* USER CODE END 1 */

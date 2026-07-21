@@ -35,3 +35,14 @@ guangdian\stm32f4xx_it.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_
 guangdian\stm32f4xx_it.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 guangdian\stm32f4xx_it.o: ../Core/Inc/stm32f4xx_it.h
 guangdian\stm32f4xx_it.o: ../Core/Inc/mpu6050.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+guangdian\stm32f4xx_it.o: ../Core/Inc/FreeRTOSConfig.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+guangdian\stm32f4xx_it.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h

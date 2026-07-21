@@ -26,10 +26,11 @@
 #include "chassis.h"
 #include "mpu6050.h"
 #include "i2c.h"
-
+#include "semphr.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include "usart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,7 +50,10 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+static volatile uint8_t g_chassis_initialized = 0;
 
+/* 信号量驱动架构: I2C DMA 完成信号量 */
+SemaphoreHandle_t g_i2c_dma_sem = NULL;
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -110,7 +114,7 @@ void MX_FREERTOS_Init(void) {
 
   /* ---- 1ms 控制定时器: 驱动梯形加减速状态机 ---- */
   controlTimerHandle = osTimerNew(ControlTimerCallback, osTimerPeriodic, NULL, &controlTimer_attributes);
-  osTimerStart(controlTimerHandle, 1U);  /* 1ms 周期 */
+  /* osTimerStart 移至 StartDefaultTask, 底盘初始化完成后再启动 */
 
   /* USER CODE END RTOS_TIMERS */
 
@@ -143,6 +147,7 @@ void MX_FREERTOS_Init(void) {
 /* 1ms 控制定时器回调: 更新梯形加减速状态机 */
 void ControlTimerCallback(void *argument)
 {
+  if (!g_chassis_initialized) return;
   Chassis_Update();
 }
 
@@ -153,12 +158,73 @@ void StartDefaultTask(void *argument)
   /* ---- 初始化底盘 ---- */
   Chassis_Init();
   Chassis_SetHeadingLock(1);
+  g_chassis_initialized = 1;
+  osTimerStart(controlTimerHandle, 1U);
   /* 等待陀螺仪初始化完成 (MPU6050_Init 约 1s) */
   osDelay(1500);
 
+  /* ---- 任务状态机: 直行50cm → 右转 → 直行10cm → 右转 → 停止 ---- */
+  enum {
+    STATE_FORWARD_50CM,
+    STATE_TURN_RIGHT_1,
+    STATE_FORWARD_10CM,
+    STATE_TURN_RIGHT_2,
+    STATE_DONE
+  } state = STATE_FORWARD_50CM;
+  uint8_t state_entered = 0;
+
   for (;;)
   {
-    
+    switch (state) {
+      case STATE_FORWARD_50CM:
+        if (!state_entered) {
+          Chassis_Moveto(1000.0f);
+          state_entered = 1;
+        }
+        if (Chassis_IsMoveDone()) {
+          state = STATE_TURN_RIGHT_1;
+          state_entered = 0;
+        }
+        break;
+
+      case STATE_TURN_RIGHT_1:
+        if (!state_entered) {
+          Chassis_RotateTo(-90.0f);
+          state_entered = 1;
+        }
+        if (Chassis_IsRotateDone()) {
+          state = STATE_FORWARD_10CM;
+          state_entered = 0;
+        }
+        break;
+
+      case STATE_FORWARD_10CM:
+        if (!state_entered) {
+          Chassis_Moveto(1000.0f);
+          state_entered = 1;
+        }
+        if (Chassis_IsMoveDone()) {
+          state = STATE_TURN_RIGHT_2;
+          state_entered = 0;
+        }
+        break;
+
+      case STATE_TURN_RIGHT_2:
+        if (!state_entered) {
+          Chassis_RotateTo(-90.0f);
+          state_entered = 1;
+        }
+        if (Chassis_IsRotateDone()) {
+          state = STATE_DONE;
+          state_entered = 0;
+        }
+        break;
+
+      case STATE_DONE:
+        /* 任务完成, 永久等待 */
+        break;
+    }
+    osDelay(10);
   }
   /* USER CODE END StartDefaultTask */
 }
@@ -167,31 +233,72 @@ void StartDefaultTask(void *argument)
 /* USER CODE BEGIN Application */
 
 /**
- * @brief  陀螺仪任务: 1ms 周期 DMA 读取 + 500ms 温度更新
+ * @brief  陀螺仪任务: 信号量驱动 DMA 架构
  * @note   优先级高于 defaultTask, 保证传感器数据实时注入
+ *         流程:
+ *           1. MPU6050_StartReadDMA() 非阻塞启动传输
+ *           2. xSemaphoreTake(g_i2c_dma_sem, 5ms) 等待 DMA 完成触发信号量
+ *           3. DMA ISR → MPU6050_OnDMAComplete() 解析数据 + 释放信号量
+ *           4. MPU6050_IntegrateYaw(dt) 积分角度
+ *           5. chassis_feed_gyro(MPU6050_GetYaw()) 注入底盘
+ *         超时保护: 5ms 无数据则继续循环, 不卡死
  */
 void StartGyroTask(void *argument)
 {
   (void)argument;
 
+  /* 创建 DMA 完成信号量 (二进制, 初始不可用) */
+  g_i2c_dma_sem = xSemaphoreCreateBinary();
+  configASSERT(g_i2c_dma_sem != NULL);
+
   /* 初始化 MPU6050 (含零偏+温度标定, 约 1s) */
   MPU6050_Init(&hi2c1);
 
   uint32_t tick = 0;
+  uint32_t print_cnt = 0;
+  TickType_t last_wake = xTaskGetTickCount();
+  const TickType_t period = pdMS_TO_TICKS(1);   /* 目标 1ms 周期 */
 
   for (;;) {
-    /* 启动 DMA 异步读取陀螺仪 6 字节 */
-    MPU6050_ReadGyro_DMA(&hi2c1, &g_mpu6050_data);
-    osDelay(1);  /* 1ms 周期 — DMA 在 540μs 内完成, 回调在 delay 期间触发 */
+    /* 启动 DMA 异步读取 6 字节 (非阻塞, 立即返回) */
+    MPU6050_StartReadDMA();
 
-    /* 注入陀螺仪数据到底盘 (角速度 + 累积角度) */
-    Chassis_SetGyroData(g_mpu6050_data.gyro_z_rad_s, g_mpu6050_data.angle_z_rad);
+    /* 等待 DMA 完成信号量, 超时 5ms 防止 I2C 总线错误时永久阻塞 */
+    BaseType_t sem_ret = xSemaphoreTake(g_i2c_dma_sem, pdMS_TO_TICKS(5));
 
-    /* 每 500ms 更新一次温度并重算温补零偏 */
-    if (++tick >= 500) {
-      tick = 0;
-      MPU6050_UpdateTemperature(&hi2c1);
+    if (sem_ret == pdTRUE) {
+      /* DMA 完成: 数据已由 ISR 中的 MPU6050_OnDMAComplete 解析 */
+      /* 基于任务实际时间步长积分 */
+      TickType_t now = xTaskGetTickCount();
+      float dt = (float)(now - last_wake) * portTICK_PERIOD_MS * 0.001f;
+      if (dt <= 0.0f) dt = 0.001f;   /* 最小 1ms */
+
+      MPU6050_IntegrateYaw(dt);
+      chassis_feed_gyro(MPU6050_GetYaw());
+
+      /* 每 500ms 更新一次温度并重算温补零偏 */
+      if (++tick >= 500) {
+        tick = 0;
+        MPU6050_UpdateTemperature(&hi2c1);
+      }
+
+      /* 每 100ms 通过 USART2 打印角速度与累积角度 (观测零漂) */
+      if (++print_cnt >= 100) {
+        print_cnt = 0;
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf),
+                          "ZRate:%+.3fd/s Yaw:%+.2fdeg\r\n",
+                          g_mpu6050_data.gyro_z_dps,
+                          g_mpu6050_data.angle_z_deg);
+        if (len > 0 && len < (int)sizeof(buf)) {
+          HAL_UART_Transmit(&huart2, (uint8_t *)buf, (uint16_t)len, 10);
+        }
+      }
     }
+    /* 若超时: I2C 总线异常, 跳过本次采样, 继续循环不卡死 */
+
+    /* 严格 1ms 周期补偿 (若提前返回则补齐, 保证采样率稳定) */
+    vTaskDelayUntil(&last_wake, period);
   }
 }
 

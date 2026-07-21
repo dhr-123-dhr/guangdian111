@@ -27,7 +27,7 @@
  *  物 理 常 量
  * ================================================================
  */
-#define MPU6050_GYRO_SENS_500         65.5f    /* ±500°/s 量程灵敏度 (°/s / LSB) */
+#define MPU6050_GYRO_SENS_500         65.5f    /* ±500°/s 量程灵敏度: LSB/(°/s), 用法: dps = raw / 65.5 */
 #define MPU6050_TEMP_OFFSET           36.53f   /* 温度偏移 (°C), 公式: °C = raw/340 + OFFSET */
 #define MPU6050_TEMP_SCALE            340.0f   /* 温度比例因子 (LSB/°C) */
 
@@ -94,5 +94,46 @@ void MPU6050_ProcessData(MPU6050_Data_t *data);
  * @note   每次调用更新 g_gyro_z_bias_dps = offset_at_ref + coeff × (T - T_ref)
  */
 void MPU6050_UpdateTemperature(I2C_HandleTypeDef *hi2c);
+
+/* ---- 信号量驱动架构新接口 ---- */
+
+/**
+ * @brief  上电静止零漂校准 (3σ鲁棒均值)
+ * @param  samples  采集样本数 (建议 ≥ 200, 预热丢弃50个)
+ * @note   调用前需确保MPU6050已正常输出, 底盘静止
+ */
+void MPU6050_CalibrateYaw(uint16_t samples);
+
+/**
+ * @brief  获取当前温度 (°C)
+ * @retval 温度值
+ */
+float MPU6050_GetTempC(void);
+
+/**
+ * @brief  启动 DMA 异步读取陀螺仪 6 字节 (非阻塞)
+ * @retval HAL_OK / HAL_ERROR
+ * @note   函数立即返回, 完成后由 MPU6050_OnDMAComplete 在 ISR 中处理
+ */
+HAL_StatusTypeDef MPU6050_StartReadDMA(void);
+
+/**
+ * @brief  DMA 完成回调 — 解析原始数据 + 置完成标志 (ISR 中调用)
+ * @note   在 HAL_I2C_MemRxCpltCallback 中调用, 锁最小化操作时间
+ */
+void MPU6050_OnDMAComplete(void);
+
+/**
+ * @brief  积分 Yaw 角度 (在任务上下文中调用, 唯一积分入口)
+ * @param  dt  积分时间步长 (s)
+ * @note   ProcessData 仅做 raw→物理量换算+零偏补偿, 不做积分; 本函数是唯一积分入口
+ */
+void MPU6050_IntegrateYaw(float dt);
+
+/**
+ * @brief  获取当前 Yaw 角度 (rad)
+ * @retval 角度值 (rad)
+ */
+float MPU6050_GetYaw(void);
 
 #endif /* __MPU6050_H__ */
