@@ -213,8 +213,14 @@ void Chassis_Update(void)
      * --------------------------------------------------------
      */
     float delta_omega = 0.0f;
-    if (g_heading_locked) {
+    if (g_heading_locked && TrapPlan_IsDone(&g_rot_planner)) {
         float error = g_heading_target_rad - g_gyro_angle_z_rad;
+
+        /* 死区: ±0.5° 过滤 MPU6050 零漂噪声 */
+        if (fabsf(error) < 0.008726646f) {
+            error = 0.0f;
+            g_heading_integral = 0.0f;
+        }
 
         /* PI 控制器 */
         g_heading_integral += error * dt;
