@@ -98,10 +98,7 @@ void Chassis_Moveto(float mm)
 
     TrapPlan_SetTarget(&g_trans_planner, target_steps);
 
-    if (g_heading_locked) {
-        g_heading_target_rad = g_gyro_angle_z_rad;   /* 同理, 锁实际传感器角度 */
-        g_heading_integral   = 0.0f;
-    }
+    /* 航向目标由 SetHeadingLock 快照, Moveto 不再覆写, 确保 PID 持续修正 */
 }
 
 /* ================================================================
@@ -115,10 +112,10 @@ void Chassis_RotateTo(float degrees)
 
     TrapPlan_SetTarget(&g_rot_planner, target_rad);
 
-    /* 同步航向目标, 防止 PID 在旋转完成后回弹 */
+    /* 航向目标在 Update 中实时从 rot_planner.current_pos 同步,
+     * 此处仅清零积分以消除旧残差 (PID 旋转期间始终运行) */
     if (g_heading_locked) {
-        g_heading_target_rad = target_rad;
-        g_heading_integral   = 0.0f;
+        g_heading_integral = 0.0f;
     }
 }
 
@@ -149,6 +146,11 @@ void Chassis_SetHeadingLock(uint8_t enable)
 {
     g_heading_locked = (enable != 0) ? 1 : 0;
     g_heading_integral = 0.0f;
+    if (g_heading_locked) {
+        /* 快照当前传感器角度作为航向目标, 避免使用未定义的旧值
+         * 后续 Moveto 不再覆写此目标, PID 持续维持锁定 */
+        g_heading_target_rad = g_gyro_angle_z_rad;
+    }
 }
 
 /* ================================================================
@@ -212,8 +214,15 @@ void Chassis_Update(void)
      *  第3步: 航向角度 PID → delta_omega (修正, ±15°/s)
      * --------------------------------------------------------
      */
+    uint8_t rot_active = !TrapPlan_IsDone(&g_rot_planner);
     float delta_omega = 0.0f;
-    if (g_heading_locked && TrapPlan_IsDone(&g_rot_planner)) {
+    if (g_heading_locked) {
+        /* 旋转期间: 实时从梯形曲线插值位置同步 PID 目标, 闭环跟踪 */
+        if (rot_active) {
+            g_heading_target_rad = g_rot_planner.current_pos;
+        }
+        /* 旋转完成后: target 冻结在 final current_pos */
+
         float error = g_heading_target_rad - g_gyro_angle_z_rad;
 
         /* 死区: ±0.5° 过滤 MPU6050 零漂噪声 */
@@ -224,16 +233,14 @@ void Chassis_Update(void)
 
         /* PI 控制器 */
         g_heading_integral += error * dt;
-        /* 积分限幅 */
-        float i_limit = HEADING_DELTA_LIMIT_RAD_S / (HEADING_KI + 0.001f);
+        /* 积分 & 输出限幅 — 按场景切换 */
+        float limit = rot_active ? HEADING_DELTA_LIMIT_RAD_S
+                                 : HEADING_DELTA_LIMIT_NAV_RAD_S;
+        float i_limit = limit / (HEADING_KI + 0.001f);
         g_heading_integral = CLAMP(g_heading_integral, -i_limit, i_limit);
 
         delta_omega = HEADING_KP * error + HEADING_KI * g_heading_integral;
-
-        /* 限幅 ±15°/s */
-        delta_omega = CLAMP(delta_omega,
-                            -HEADING_DELTA_LIMIT_RAD_S,
-                             HEADING_DELTA_LIMIT_RAD_S);
+        delta_omega = CLAMP(delta_omega, -limit, limit);
     }
 
     /* --------------------------------------------------------

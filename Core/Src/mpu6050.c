@@ -93,7 +93,7 @@ static void MPU6050_Calibrate(I2C_HandleTypeDef *hi2c)
     float sum_temp   = 0.0f;
     int   valid      = 0;
 
-    for (int i = 0; i < 2000; i++) {
+    for (int i = 0; i < 200; i++) {
         int16_t raw_gyro_z, raw_temp;
         if (mpu_read_sample(hi2c, &raw_gyro_z, &raw_temp) == HAL_OK) {
             sum_gyro_z += (float)raw_gyro_z / MPU6050_GYRO_SENS_500;
