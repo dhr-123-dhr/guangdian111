@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "usart.h"
 #include "gray_sensor.h"
 /* USER CODE END Includes */
@@ -80,7 +81,7 @@ static const osTimerAttr_t controlTimer_attributes = {
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 128 * 4,
+  .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 
@@ -166,16 +167,38 @@ void StartDefaultTask(void *argument)
     STATE_FORWARD_1M_2,
     STATE_GRAY_ROTATE_WAIT,
     STATE_REVERSE_1M,
+		STATE_GO_1M,
+    STATE_BACK_1M,
     STATE_DONE
   } state = STATE_FORWARD_1M;
   uint8_t state_entered = 0;
+  int last_state = -1;       /* 上次状态, 用于仅打印变化 */
+  uint16_t rev_cnt = 0;      /* ST:4 诊断计数器 */
 
   for (;;)
   {
+    /* 仅状态变化时打印, 减少串口负担 */
+    if (state != last_state) {
+      char sbuf[20];
+      snprintf(sbuf, sizeof(sbuf), "ST:%d\r\n", state);
+      HAL_UART_Transmit(&huart2, (uint8_t*)sbuf, (uint16_t)strlen(sbuf), 10);
+      last_state = state;
+    }
+    /* ST:4 诊断: 每50次(约500ms)打印一次电机速度+MoveDone */
+    if (state == STATE_REVERSE_1M && ++rev_cnt >= 50) {
+      rev_cnt = 0;
+      char dbuf[64];
+      snprintf(dbuf, sizeof(dbuf),
+               "ML:%+.1f MR:%+.1f MD:%d\r\n",
+               Motor_GetSpeed(&g_motor_left),
+               Motor_GetSpeed(&g_motor_right),
+               Chassis_IsMoveDone());
+      HAL_UART_Transmit(&huart2, (uint8_t*)dbuf, (uint16_t)strlen(dbuf), 10);
+    }
     switch (state) {
       case STATE_FORWARD_1M:
         if (!state_entered) {
-          Chassis_Moveto(1000.0f);
+          Chassis_Moveto(780.0f);
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
@@ -197,7 +220,7 @@ void StartDefaultTask(void *argument)
 
       case STATE_FORWARD_1M_2:
         if (!state_entered) {
-          Chassis_Moveto(500.0f);
+          Chassis_Moveto(200.0f);
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
@@ -218,7 +241,31 @@ void StartDefaultTask(void *argument)
 
       case STATE_REVERSE_1M:
         if (!state_entered) {
-          Chassis_Moveto(-1000.0f);
+          Chassis_Moveto(50.0f);
+          HAL_UART_Transmit(&huart2, (uint8_t*)"REV CMD\r\n", 9, 10);
+          state_entered = 1;
+        }
+        if (Chassis_IsMoveDone()) {
+					osDelay(300);
+          GraySensor_CorrectPose();
+          state = STATE_GO_1M;
+          state_entered = 0;
+        }
+      case STATE_GO_1M:
+        if (!state_entered) {
+          Chassis_Moveto(630.0f);
+          HAL_UART_Transmit(&huart2, (uint8_t*)"GO CMD\r\n", 8, 10);
+          state_entered = 1;
+        }
+        if (Chassis_IsMoveDone()) {
+          state = STATE_BACK_1M;
+          state_entered = 0;
+        }
+        break;
+      case STATE_BACK_1M:
+        if (!state_entered) {
+          Chassis_Moveto(-780.0f);
+          HAL_UART_Transmit(&huart2, (uint8_t*)"BACK CMD\r\n", 10, 10);
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
@@ -226,7 +273,6 @@ void StartDefaultTask(void *argument)
           state_entered = 0;
         }
         break;
-
       case STATE_DONE:
         /* 任务完成, 永久等待 */
         break;
@@ -303,17 +349,18 @@ void StartGyroTask(void *argument)
         /* 灰度读取结果打印 */
         if (g_gray_read_ok == 1) {
           g_gray_read_ok = 0;
-          char buf[80];
-          int p = 0;
-          for (int i = 0; i < 8; i++)
-            p += snprintf(buf+p, sizeof(buf)-p, "%d ", g_gray_info_last.channels[i]);
-          p += snprintf(buf+p, sizeof(buf)-p, "ofs=%.1f on=%d cross=%d\r\n",
-                        g_gray_info_last.offset, g_gray_info_last.is_on_line, g_gray_info_last.is_crossroad);
-          HAL_UART_Transmit(&huart2, (uint8_t*)buf, (uint16_t)p, 10);
+          char gray_buf[128];
+          int gray_len = snprintf(gray_buf, sizeof(gray_buf),
+              "Gray: x1:%d x2:%d x3:%d x4:%d x5:%d x6:%d x7:%d x8:%d off:%.2f cnt:%d\r\n",
+              g_gray_info_last.channels[0], g_gray_info_last.channels[1],
+              g_gray_info_last.channels[2], g_gray_info_last.channels[3],
+              g_gray_info_last.channels[4], g_gray_info_last.channels[5],
+              g_gray_info_last.channels[6], g_gray_info_last.channels[7],
+              g_gray_info_last.offset, g_gray_info_last.active_count);
+          if (gray_len > 0 && gray_len < (int)sizeof(gray_buf)) {
+            HAL_UART_Transmit(&huart2, (uint8_t *)gray_buf, (uint16_t)gray_len, 10);
+          }
         } else if (g_gray_read_ok == 2) {
-          g_gray_read_ok = 0;
-          HAL_UART_Transmit(&huart2, (uint8_t *)"huidu fail tx\r\n", 15, 10);
-        } else if (g_gray_read_ok == 3) {
           g_gray_read_ok = 0;
           HAL_UART_Transmit(&huart2, (uint8_t *)"huidu fail rx\r\n", 15, 10);
         }
