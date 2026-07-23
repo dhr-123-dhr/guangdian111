@@ -189,7 +189,7 @@ void StartDefaultTask(void *argument)
 
       case STATE_TURN_RIGHT_1:
         if (!state_entered) {
-          Chassis_RotateTo(-90.0f);
+          Chassis_RotateTo(-45.0f);
           state_entered = 1;
         }
         if (Chassis_IsRotateDone()) {

@@ -44,7 +44,7 @@
  */
 #define HEADING_KP                  5.0f
 #define HEADING_KI                  0.5f
-#define HEADING_DELTA_LIMIT_RAD_S   0.2618f   /* ±15°/s = ±0.2618 rad/s (旋转用) */
+#define HEADING_DELTA_LIMIT_RAD_S   0.2618f   /* 	±15°/s = ±0.2618 rad/s (旋转用) */
 #define HEADING_DELTA_LIMIT_NAV_RAD_S 0.0873f /* ±5°/s = ±0.0873 rad/s (平移用) */
 
 /* 由以上参数自动换算 */
