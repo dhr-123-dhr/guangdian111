@@ -45,6 +45,7 @@ guangdian\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os.h
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h
 guangdian\freertos.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
+guangdian\freertos.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
 guangdian\freertos.o: ../Core/Inc/usart.h
 guangdian\freertos.o: ../Core/Inc/gray_sensor.h
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h

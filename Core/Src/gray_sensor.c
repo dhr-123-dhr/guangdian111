@@ -238,10 +238,13 @@ GraySensor_Info_t GraySensor_ReadOnce(void)
         calc_offset(&info);
         info.read_success = 1;
         g_gray_read_ok = 1;   /* 读取成功 */
+
+        /* 同步到全局变量, 供 freertos.c 打印 */
+        memcpy((void *)&g_gray_info_last, &info, sizeof(info));
     } else {
         info.read_success = 0;
         /* 诊断: 通过 USART2 打印 DMA 缓冲区前50字节 (遇到0x00就停) */
-        char hex[205];
+        static char hex[205];
         int pos = 0;
         for (uint8_t i = 0; i < 50; i++) {
             if (s_dma_buf[i] == 0) break;
