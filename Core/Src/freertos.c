@@ -160,15 +160,18 @@ void StartDefaultTask(void *argument)
   /* 等待陀螺仪初始化完成 (MPU6050_Init 约 1s) */
   osDelay(1500);
 
-  /* ---- 任务状态机: 直行1m → 右转45° → 直行1m → 矫正 → 倒退1m → 停止 ---- */
+  /* ---- 任务状态机: 直行780mm → 转-45° → 直行200mm → 灰度矫正倒退 → 前进 → 倒退 ---- */
   enum {
     STATE_FORWARD_1M,
     STATE_ROTATE_45,
     STATE_FORWARD_1M_2,
-    STATE_GRAY_ROTATE_WAIT,
     STATE_REVERSE_1M,
-		STATE_GO_1M,
+    STATE_GO_1M,
     STATE_BACK_1M,
+    STATE_ZHUAN,
+    STATE_GOGO,
+    STATE_MOVE_300,
+    STATE_MOVE_1000,
     STATE_DONE
   } state = STATE_FORWARD_1M;
   uint8_t state_entered = 0;
@@ -198,7 +201,19 @@ void StartDefaultTask(void *argument)
     switch (state) {
       case STATE_FORWARD_1M:
         if (!state_entered) {
-          Chassis_Moveto(780.0f);
+          Chassis_Moveto(500.0f-PAIN);
+          state_entered = 1;
+        }
+        if (Chassis_IsMoveDone()) {
+          osDelay(300);
+          GraySensor_CorrectPose(1);
+          state = STATE_MOVE_1000;
+          state_entered = 0;
+        }
+        break;
+      case STATE_MOVE_1000:
+        if (!state_entered) {
+          Chassis_Moveto(587.0f);
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
@@ -206,13 +221,12 @@ void StartDefaultTask(void *argument)
           state_entered = 0;
         }
         break;
-
       case STATE_ROTATE_45:
         if (!state_entered) {
-          Chassis_RotateTo(-45.0f);
+          Chassis_Moveto(-390.0f);
           state_entered = 1;
         }
-        if (Chassis_IsRotateDone()) {
+        if (Chassis_IsMoveDone()) {
           state = STATE_FORWARD_1M_2;
           state_entered = 0;
         }
@@ -220,20 +234,13 @@ void StartDefaultTask(void *argument)
 
       case STATE_FORWARD_1M_2:
         if (!state_entered) {
-          Chassis_Moveto(200.0f);
+          Chassis_RotateTo(90.f);
           state_entered = 1;
         }
-        if (Chassis_IsMoveDone()) {
-          /* 停稳后用灰度传感器矫正车姿 */
-          osDelay(300);
-          GraySensor_CorrectPose();
-          state = STATE_GRAY_ROTATE_WAIT;
-          state_entered = 0;
-        }
-        break;
-
-      case STATE_GRAY_ROTATE_WAIT:
         if (Chassis_IsRotateDone()) {
+          /* 停稳后用灰度传感器矫正车姿 (阻塞, 三步全完成才返回) */
+          // osDelay(300);
+          // GraySensor_CorrectPose(1);
           state = STATE_REVERSE_1M;
           state_entered = 0;
         }
@@ -241,19 +248,30 @@ void StartDefaultTask(void *argument)
 
       case STATE_REVERSE_1M:
         if (!state_entered) {
-          Chassis_Moveto(50.0f);
+          Chassis_Moveto(200.0f);
           HAL_UART_Transmit(&huart2, (uint8_t*)"REV CMD\r\n", 9, 10);
           state_entered = 1;
         }
+        if (Chassis_IsMoveDone()) {      
+          osDelay(300);
+          GraySensor_CorrectPose(1); 
+          state = STATE_MOVE_300;
+          state_entered = 0;
+        }
+        break;
+      case STATE_MOVE_300:
+        if (!state_entered) {
+          Chassis_Moveto(160.0f);
+          state_entered = 1;
+        }
         if (Chassis_IsMoveDone()) {
-					osDelay(300);
-          GraySensor_CorrectPose();
           state = STATE_GO_1M;
           state_entered = 0;
         }
+        break;
       case STATE_GO_1M:
         if (!state_entered) {
-          Chassis_Moveto(630.0f);
+          Chassis_Moveto(-390.0f);
           HAL_UART_Transmit(&huart2, (uint8_t*)"GO CMD\r\n", 8, 10);
           state_entered = 1;
         }
@@ -264,7 +282,29 @@ void StartDefaultTask(void *argument)
         break;
       case STATE_BACK_1M:
         if (!state_entered) {
-          Chassis_Moveto(-780.0f);
+          Chassis_RotateTo(-180);
+          HAL_UART_Transmit(&huart2, (uint8_t*)"BACK CMD\r\n", 10, 10);
+          state_entered = 1;
+        }
+        if (Chassis_IsRotateDone()) {
+          state = STATE_ZHUAN;
+          state_entered = 0;
+        }
+        break;
+				case STATE_ZHUAN:
+        if (!state_entered) {
+          Chassis_Moveto(390.0f);
+          HAL_UART_Transmit(&huart2, (uint8_t*)"BACK CMD\r\n", 10, 10);
+          state_entered = 1;
+        }
+        if (Chassis_IsMoveDone()) {
+          state = STATE_GOGO;
+          state_entered = 0;
+        }
+        break;
+				case STATE_GOGO:
+        if (!state_entered) {
+          Chassis_Moveto(-390.f);         
           HAL_UART_Transmit(&huart2, (uint8_t*)"BACK CMD\r\n", 10, 10);
           state_entered = 1;
         }

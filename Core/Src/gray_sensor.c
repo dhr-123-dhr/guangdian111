@@ -262,23 +262,21 @@ GraySensor_Info_t GraySensor_ReadOnce(void)
 }
 
 /**
- * @brief  一站式矫正 (非阻塞)
- * @note   内部: 读灰度 → 算偏差 → Chassis_RotateTo(angle) → 返回
- *         调用后状态机需检查 Chassis_IsRotateDone() 等待旋转完成
- *
- *         矫正逻辑:
- *           offset < 0 (偏左) → angle = offset * CORRECT_FACTOR
- *           offset > 0 (偏右) → angle = offset * CORRECT_FACTOR (负值=左转)
- *           脱线 (8路全0) 或路口 (≥5路) → 不矫正, 直接返回
- *
- *         使用 Chassis_RotateTo 而非直接操作电机:
- *           1ms 定时器的 Chassis_Update 持续运行航向 PID,
- *           统一管线接管避免两个指令源打架
+ * @brief  一站式矫正 (阻塞, 三步: 旋转 → 移动 → 回转)
+ * @note   两驱差速校正流程:
+ *           1. 读灰度 → 算偏差 → angle = offset * CORRECT_FACTOR
+ *           2. 若 abs(offset) < 0.3 居中, 直接返回
+ *           3. Chassis_RotateTo(+angle)   等待旋转完成
+ *           4. Chassis_Moveto(dir * 50mm) 等待移动完成
+ *           5. Chassis_RotateTo(-angle)   等待回转完成
+ *         三步全为阻塞等待, 函数返回时校正已结束, 无需额外状态机
+ * @param  direction  移动方向: +1=前进 5cm, -1=后退 5cm
  */
-void GraySensor_CorrectPose(void)
+void GraySensor_CorrectPose(int8_t direction)
 {
+    int PIAN;
     GraySensor_Info_t info = GraySensor_ReadOnce();
-     
+
     /* 读取失败、脱线、路口: 不矫正 */
     if (!info.read_success || !info.is_on_line || info.is_crossroad) {
         return;
@@ -290,9 +288,28 @@ void GraySensor_CorrectPose(void)
         return;
     }
 
-    /* 计算矫正角度: 偏差 × 系数 */
+    /* 计算矫正角度: 偏差 × 系数 (负offset=偏左, 正转右调) */
     float angle = -info.offset * CORRECT_FACTOR;
 
-    /* 非阻塞: 下发旋转目标, 由 1ms 定时器统一管线接管 */
+    /* ---- 第1步: 旋转到校正角度 (侧移对齐) ---- */
     Chassis_RotateTo(angle);
+    while (!Chassis_IsRotateDone()) {
+        osDelay(5);
+    }
+    osDelay(50);  /* 停稳 */
+
+    /* ---- 第2步: 直线移动 5cm ---- */
+    Chassis_Moveto((float)direction * 50.0f);
+    while (!Chassis_IsMoveDone()) {
+        osDelay(5);
+    }
+    osDelay(100);  /* 停稳 + 读传感器前稳定 */
+
+    /* ---- 第3步: 回转归位 ---- */
+    Chassis_RotateTo(-angle);
+    while (!Chassis_IsRotateDone()) {
+        osDelay(5);
+    }
+    osDelay(50);  /* 停稳 */
+    return PAIN;
 }

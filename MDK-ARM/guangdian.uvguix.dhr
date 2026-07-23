@@ -91,10 +91,10 @@
         <yPos>-1</yPos>
       </MaxPosition>
       <NormalPosition>
-        <Top>173</Top>
-        <Left>195</Left>
-        <Right>1029</Right>
-        <Bottom>967</Bottom>
+        <Top>0</Top>
+        <Left>490</Left>
+        <Right>1324</Right>
+        <Bottom>794</Bottom>
       </NormalPosition>
     </WindowPosition>
     <MDIClientArea>
@@ -1816,7 +1816,7 @@
       <Doc>
         <Name>../Core/Src/main.c</Name>
         <ColumnNumber>0</ColumnNumber>
-        <TopLine>1</TopLine>
+        <TopLine>203</TopLine>
         <CurrentLine>1</CurrentLine>
         <Folding>1</Folding>
         <ContractedFolders></ContractedFolders>
@@ -1824,9 +1824,9 @@
       </Doc>
       <Doc>
         <Name>../Core/Src/freertos.c</Name>
-        <ColumnNumber>28</ColumnNumber>
-        <TopLine>230</TopLine>
-        <CurrentLine>256</CurrentLine>
+        <ColumnNumber>27</ColumnNumber>
+        <TopLine>193</TopLine>
+        <CurrentLine>216</CurrentLine>
         <Folding>1</Folding>
         <ContractedFolders></ContractedFolders>
         <PaneID>0</PaneID>
@@ -1923,7 +1923,7 @@
       </Doc>
       <Doc>
         <Name>..\Core\Src\gray_sensor.c</Name>
-        <ColumnNumber>18</ColumnNumber>
+        <ColumnNumber>21</ColumnNumber>
         <TopLine>10</TopLine>
         <CurrentLine>35</CurrentLine>
         <Folding>1</Folding>
@@ -1933,7 +1933,7 @@
       <Doc>
         <Name>../Core/Inc/gray_sensor.h</Name>
         <ColumnNumber>33</ColumnNumber>
-        <TopLine>1</TopLine>
+        <TopLine>13</TopLine>
         <CurrentLine>13</CurrentLine>
         <Folding>1</Folding>
         <ContractedFolders></ContractedFolders>
