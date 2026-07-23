@@ -31,6 +31,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "usart.h"
+#include "gray_sensor.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -158,63 +159,75 @@ void StartDefaultTask(void *argument)
   /* ---- 初始化底盘 ---- */
   Chassis_Init();
   Chassis_SetHeadingLock(1);
+  GraySensor_Init();  // 清空USART3缓冲区 + 确保模块静默
   g_chassis_initialized = 1;
   osTimerStart(controlTimerHandle, 1U);
   /* 等待陀螺仪初始化完成 (MPU6050_Init 约 1s) */
   osDelay(1500);
 
-  /* ---- 任务状态机: 直行50cm → 右转 → 直行10cm → 右转 → 停止 ---- */
+  /* ---- 任务状态机: 直行1m → 右转45° → 直行1m → 矫正 → 倒退1m → 停止 ---- */
   enum {
-    STATE_FORWARD_50CM,
-    STATE_TURN_RIGHT_1,
-    STATE_FORWARD_10CM,
-    STATE_TURN_RIGHT_2,
+    STATE_FORWARD_1M,
+    STATE_ROTATE_45,
+    STATE_FORWARD_1M_2,
+    STATE_GRAY_ROTATE_WAIT,
+    STATE_REVERSE_1M,
     STATE_DONE
-  } state = STATE_FORWARD_50CM;
+  } state = STATE_FORWARD_1M;
   uint8_t state_entered = 0;
 
   for (;;)
   {
     switch (state) {
-      case STATE_FORWARD_50CM:
+      case STATE_FORWARD_1M:
         if (!state_entered) {
           Chassis_Moveto(1000.0f);
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
-          state = STATE_TURN_RIGHT_1;
+          state = STATE_ROTATE_45;
           state_entered = 0;
         }
         break;
 
-      case STATE_TURN_RIGHT_1:
+      case STATE_ROTATE_45:
         if (!state_entered) {
           Chassis_RotateTo(-45.0f);
           state_entered = 1;
         }
         if (Chassis_IsRotateDone()) {
-          state = STATE_FORWARD_10CM;
+          state = STATE_FORWARD_1M_2;
           state_entered = 0;
         }
         break;
 
-      case STATE_FORWARD_10CM:
+      case STATE_FORWARD_1M_2:
         if (!state_entered) {
-          Chassis_Moveto(1000.0f);
+          Chassis_Moveto(500.0f);
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
-          state = STATE_TURN_RIGHT_2;
+          /* 停稳后用灰度传感器矫正车姿 */
+          osDelay(300);
+          GraySensor_CorrectPose();
+          state = STATE_GRAY_ROTATE_WAIT;
           state_entered = 0;
         }
         break;
 
-      case STATE_TURN_RIGHT_2:
+      case STATE_GRAY_ROTATE_WAIT:
+        if (Chassis_IsRotateDone()) {
+          state = STATE_REVERSE_1M;
+          state_entered = 0;
+        }
+        break;
+
+      case STATE_REVERSE_1M:
         if (!state_entered) {
-          Chassis_RotateTo(-90.0f);
+          Chassis_Moveto(-1000.0f);
           state_entered = 1;
         }
-        if (Chassis_IsRotateDone()) {
+        if (Chassis_IsMoveDone()) {
           state = STATE_DONE;
           state_entered = 0;
         }
@@ -292,6 +305,14 @@ void StartGyroTask(void *argument)
                           g_mpu6050_data.angle_z_deg);
         if (len > 0 && len < (int)sizeof(buf)) {
           HAL_UART_Transmit(&huart2, (uint8_t *)buf, (uint16_t)len, 10);
+        }
+        /* 灰度读取结果打印 */
+        if (g_gray_read_ok == 1) {
+          g_gray_read_ok = 0;
+          HAL_UART_Transmit(&huart2, (uint8_t *)"huidu ok\r\n", 10, 10);
+        } else if (g_gray_read_ok == 2) {
+          g_gray_read_ok = 0;
+          HAL_UART_Transmit(&huart2, (uint8_t *)"huidu fail\r\n", 12, 10);
         }
       }
     }

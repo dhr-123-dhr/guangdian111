@@ -35,6 +35,7 @@ virtualFolder:
                 - path: ../Core/Src/chassis.c
                 - path: ../Core/Src/motor.c
                 - path: ../Core/Src/mpu6050.c
+                - path: ../Core/Src/gray_sensor.c
               folders: []
     - name: Drivers
       files: []

@@ -54,3 +54,4 @@ guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.
 guangdian\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
 guangdian\freertos.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
 guangdian\freertos.o: ../Core/Inc/usart.h
+guangdian\freertos.o: ../Core/Inc/gray_sensor.h

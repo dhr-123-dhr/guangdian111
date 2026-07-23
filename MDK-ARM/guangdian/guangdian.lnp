@@ -15,6 +15,7 @@
 "guangdian\motor.o"
 "guangdian\trap_plan.o"
 "guangdian\mpu6050.o"
+"guangdian\gray_sensor.o"
 "guangdian\stm32f4xx_hal_tim.o"
 "guangdian\stm32f4xx_hal_tim_ex.o"
 "guangdian\stm32f4xx_hal_rcc.o"

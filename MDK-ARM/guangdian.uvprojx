@@ -520,6 +520,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\mpu6050.c</FilePath>
             </File>
+            <File>
+              <FileName>gray_sensor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\gray_sensor.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

@@ -26,6 +26,7 @@
 #include "usb_otg.h"
 #include "gpio.h"
 #include "motor.h"
+#include "gray_sensor.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -108,6 +109,9 @@ HAL_Delay(1000);  /* 等待电源稳定, 避免 I2C 总线异常 */
   MX_USART6_UART_Init();
   MX_USB_OTG_FS_USB_Init();
   /* USER CODE BEGIN 2 */
+
+  
+  // GraySensor_Init();
 
   /* USER CODE END 2 */
 

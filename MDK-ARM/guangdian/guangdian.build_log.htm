@@ -22,12 +22,22 @@ Dialog DLL:      TCM.DLL V1.32.0.0
  
 <h2>Project:</h2>
 C:\Users\dhr\Desktop\guangdian\MDK-ARM\guangdian.uvprojx
-Project File Date:  07/20/2026
+Project File Date:  07/23/2026
 
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 5 (build 528)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'guangdian'
-"guangdian\guangdian.axf" - 0 Error(s), 0 Warning(s).
+compiling usart.c...
+compiling main.c...
+../Core/Inc/motor.h(86): warning:  #1-D: last line of file ends without a newline
+  #endif /* __MOTOR_H__ */
+../Core/Inc/gray_sensor.h(73): warning:  #1-D: last line of file ends without a newline
+  #endif /* __GRAY_SENSOR_H__ */
+../Core/Src/main.c: 2 warnings, 0 errors
+linking...
+Program Size: Code=33392 RO-data=804 RW-data=224 ZI-data=21528  
+FromELF: creating hex file...
+"guangdian\guangdian.axf" - 0 Error(s), 2 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -49,7 +59,7 @@ Package Vendor: Keil
 <h2>Collection of Component Files used:</h2>
 
    * Component: ARM::CMSIS:CORE:5.0.1
-Build Time Elapsed:  00:00:00
+Build Time Elapsed:  00:00:03
 </pre>
 </body>
 </html>
