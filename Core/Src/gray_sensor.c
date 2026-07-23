@@ -1,19 +1,25 @@
 /**
  * @file    gray_sensor.c
- * @brief   八路灰度循迹模块 — 单次按需读取 & 车姿矫正 (亚博IRTack)
+ * @brief   八路灰度循迹模块 — DMA接收模式 (亚博IRTack)
  * @note    基于 STM32F407VGT6 + HAL 库 + FreeRTOS
+ *
+ * 通讯方式: USART6(PC6/PC7), 115200, DMA2 Stream1 Channel5 (RX Normal模式)
  *
  * 模块行为:
  *   上电后默认不发数据, 收到 $0,0,1# 后开始持续上报数字帧
  *   收到 $0,0,0# 后停止上报
  *
- * 本模块采用"开启→收帧→关闭"单次按需流程：
- *   车停稳 → 发开启指令 → 立即阻塞收帧 → 发关闭指令 → 模块静默
- *   (无 osDelay 等待, parse_frame 首字节超时 500ms 自然等待模块响应)
+ * 本模块采用"开启→DMA收帧→关闭"单次按需流程：
+ *   Start DMA → 发开启指令 → osDelay(50ms) 等DMA搬数据 → Stop DMA → 发关闭指令 → 解析
+ *
+ *   根因修复:
+ *     轮询模式 HAL_UART_Receive 逐字节读, 115200下每字节87μs,
+ *     HAL开销导致UART Overrun Error → 字节丢失 → 帧格式打碎。
+ *     改为DMA接收: 硬件自动搬字节, CPU不参与, 不会overrun。
  *
  * 帧格式: $D,x1:<v>,x2:<v>,x3:<v>,x4:<v>,x5:<v>,x6:<v>,x7:<v>,x8:<v>#
- * 例: $D,x1:1,x2:0,x3:0,x4:1,x5:0,x6:0,x7:0,x8:0#
- *       x1 和 x4 检测到黑线
+ * 例: $D,x1:0,x2:1,x3:1,x4:0,x5:1,x6:1,x7:1,x8:1#
+ *       x1 和 x4 检测到黑线 (0=黑线)
  *
  * 通道映射:
  *   x1 = L4 (最左, weight -4)   →   ch[0]
@@ -31,10 +37,18 @@
 #include "chassis.h"
 #include "cmsis_os2.h"
 #include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
 
-/* 灰度读取成功标志 (freertos.c 陀螺仪任务轮询) */
+/* 灰度读取结果标志 (freertos.c 陀螺仪任务轮询)
+ *   0 = 无事件
+ *   1 = 读取成功
+ *   2 = CMD_START 发送失败 或 DMA 启动失败
+ *   3 = 解析失败 (超时或帧格式错)
+ *   4 = 保留 (轮询模式旧错误码, 兼容)
+ */
 volatile uint8_t g_gray_read_ok = 0;
+volatile GraySensor_Info_t g_gray_info_last = {0};
 
 /* ================================================================
  *  内 部 常 量
@@ -51,33 +65,13 @@ static const char *CMD_STOP  = "$0,0,0#";
 /* 指令长度 (含串结尾) */
 #define CMD_LEN              7
 
+/* DMA 接收缓冲区 (100字节 > 单帧43字节, 足够存一帧+额外数据) */
+static uint8_t s_dma_buf[100];
+
 /* ================================================================
  *  内 部 辅 助 函 数
  * ================================================================
  */
-
-/**
- * @brief  阻塞读取 1 字节, 带超时
- * @param  pch      输出字节指针
- * @param  timeout  超时 (ms)
- * @return HAL_OK 成功, 其他为超时或错误
- */
-static HAL_StatusTypeDef uart_read_byte(uint8_t *pch, uint32_t timeout)
-{
-    return HAL_UART_Receive(&huart6, pch, 1, timeout);
-}
-
-/**
- * @brief  清空 UART RX 缓冲区, 丢弃残留数据
- */
-static void uart_flush_rx(void)
-{
-    uint8_t dummy;
-    /* 快速清空: 以极短超时连续读取直到超时 */
-    while (HAL_UART_Receive(&huart6, &dummy, 1, 1) == HAL_OK) {
-        /* 丢弃 */
-    }
-}
 
 /**
  * @brief  发送指令到模块
@@ -90,126 +84,56 @@ static HAL_StatusTypeDef uart_send_cmd(const char *cmd)
 }
 
 /**
- * @brief  解析一帧灰度传感器数据
- * @note   帧格式: $D,x1:v,x2:v,...,x8:v#
- *         逐字节状态机解析, 不依赖 sscanf (节省 flash)
- *         遇到 I 开头的版本字符串会自然跳过 (不是 $D 帧头)
+ * @brief  从DMA缓冲区解析一帧灰度数据 (固定偏移取值)
+ * @note   扫描 s_dma_buf 找帧头 '$D', 再找帧尾 '#'
+ *         取值位置: s_dma_buf[frame_start + 6 + i*5], i=0~7
+ *         与官方亚博代码 new_package[6+i*5] 完全一致
  * @param  info  输出解析结果
  * @return 1=解析成功, 0=失败
  */
-static uint8_t parse_frame(GraySensor_Info_t *info)
+static uint8_t parse_dma_frame(GraySensor_Info_t *info)
 {
-    uint8_t  ch;
-    uint8_t  chan_idx = 0;       /* 当前通道索引 0~7 */
-    uint8_t  state = 0;          /* 0=等'$', 1=等'D', 2=等',', 3=等'x', 4=等':', 5=等'0'/'1' */
-    char     expect_x = 0;       /* 期望的 xN 编号, 1~8 */
-
-    /* 超时已在外层处理, 此处仅逐字节解析 */
-    for (;;) {
-        /* 阻塞读 1 字节, 超时 500ms */
-        if (uart_read_byte(&ch, GRAY_SENSOR_TIMEOUT_MS) != HAL_OK) {
-            return 0;
-        }
-
-        switch (state) {
-        case 0: /* 等待帧头 '$' */
-            if (ch == '$') {
-                state = 1;
-            }
-            /* 非 '$' 静默跳过 */
+    /* 扫描找帧头 '$D' */
+    int16_t frame_start = -1;
+    for (uint8_t i = 0; i < 95; i++) {   /* 至少留5字节空间 */
+        if (s_dma_buf[i] == '$' && s_dma_buf[i + 1] == 'D') {
+            frame_start = i;
             break;
-
-        case 1: /* 等待 'D' */
-            if (ch == 'D') {
-                state = 2;
-            } else {
-                state = 0;  /* 非法字符, 回退重新找帧头 */
-                if (ch == '$') state = 1;  /* 但如果是 $ 就立即进入状态1 */
-            }
-            break;
-
-        case 2: /* 等待 ',' 或直接以 x1 开头 */
-            if (ch == ',') {
-                state = 3;
-                expect_x = 0;
-            } else if (ch == 'x') {
-                state = 4;
-                expect_x = 0;
-            } else if (ch == '#') {
-                /* 空帧 (0通道), 帧尾提前 */
-                state = 99;
-            } else {
-                /* 非法字符 */
-                state = 0;
-                if (ch == '$') state = 1;
-            }
-            break;
-
-        case 3: /* 等待 'x' */
-            if (ch == 'x') {
-                state = 4;
-                expect_x = 0;
-            } else if (ch == '#') {
-                state = 99;
-            } else {
-                state = 0;
-                if (ch == '$') state = 1;
-            }
-            break;
-
-        case 4: /* 等待通道编号数字 (1~8) */
-            if (ch >= '1' && ch <= '8') {
-                expect_x = ch - '0';       /* 1~8 */
-                state = 5;
-            } else {
-                state = 0;
-                if (ch == '$') state = 1;
-            }
-            break;
-
-        case 5: /* 等待 ':' */
-            if (ch == ':') {
-                state = 6;
-            } else {
-                state = 0;
-                if (ch == '$') state = 1;
-            }
-            break;
-
-        case 6: /* 等待值 '0' 或 '1' */
-            if (ch == '0' || ch == '1') {
-                if (expect_x >= 1 && expect_x <= 8) {
-                    uint8_t idx = expect_x - 1;
-                    info->channels[idx] = (ch == '1') ? 1 : 0;
-                    chan_idx++;
-                }
-                state = 2;  /* 准备下一个通道 (等 ',' 或 '#' 或 'x') */
-            } else if (ch == '#') {
-                /* 帧尾, 通道可能不足 */
-                state = 99;
-            } else {
-                state = 0;
-                if (ch == '$') state = 1;
-            }
-            break;
-
-        case 99: /* 帧尾已遇到 */
-        default:
-            /* 帧尾, 跳出 */
-            return (chan_idx == 8) ? 1 : 0;
-        }
-
-        /* 安全保护: 如果已解析8个通道, 等帧尾 */
-        if (chan_idx >= 8) {
-            /* 读取剩余直到 '#' */
-            while (ch != '#') {
-                if (uart_read_byte(&ch, GRAY_SENSOR_TIMEOUT_MS) != HAL_OK) {
-                    return 0;
-                }
-            }
-            return 1;
         }
     }
+    if (frame_start < 0) {
+        return 0;   /* 没找到帧头 */
+    }
+
+    /* 找帧尾 '#' */
+    int16_t frame_end = -1;
+    for (uint8_t i = frame_start; i < 100; i++) {
+        if (s_dma_buf[i] == '#') {
+            frame_end = i;
+            break;
+        }
+    }
+    if (frame_end < 0) {
+        return 0;   /* 没找到帧尾 */
+    }
+
+    /* 固定偏移取值 (与官方亚博代码完全一致) */
+    for (uint8_t i = 0; i < 8; i++) {
+        uint8_t val_pos = frame_start + 6 + i * 5;
+        if (val_pos >= 100) {
+            return 0;   /* 越界保护 */
+        }
+        char v = s_dma_buf[val_pos];
+        if (v == '0') {
+            info->channels[i] = 0;
+        } else if (v == '1') {
+            info->channels[i] = 1;
+        } else {
+            return 0;   /* 值不是0/1, 数据有问题 */
+        }
+    }
+
+    return 1;
 }
 
 /**
@@ -245,33 +169,35 @@ static void calc_offset(GraySensor_Info_t *info)
  */
 
 /**
- * @brief  初始化灰度传感器串口
+ * @brief  初始化灰度传感器 (确保模块静默)
  * @note   USART6 已由 CubeMX (MX_USART6_UART_Init) 初始化,
- *         此处清空缓冲区保证干净态
+ *         此处仅发送关闭指令确保模块不发数据
  */
 void GraySensor_Init(void)
 {
     /* 确认 USART6 句柄有效 */
     if (huart6.Instance != USART6) {
-        /* 异常: 强制调用 CubeMX 初始化保证可用 */
         MX_USART6_UART_Init();
     }
 
-    /* 清空残留在 RX 缓冲区的数据 */
-    uart_flush_rx();
-
     /* 确保模块初始为关闭态 (不发数据) */
     uart_send_cmd(CMD_STOP);
+
+    /* 等待模块处理关闭指令 */
+    osDelay(10);
 }
 
 /**
- * @brief  单次按需读取灰度传感器数据
+ * @brief  单次DMA接收灰度传感器数据并解析
  * @note   完整流程:
- *           1. 发送 "$0,0,1#" 开启模块数字量上报
- *           2. 立即阻塞接收一帧, 状态机解析 (首字节超时 500ms, 无须 osDelay)
- *           3. 发送 "$0,0,0#" 关闭模块输出
- *           4. 清空残留数据 (关闭指令后可能还有最后一帧)
- *           5. 计算偏差, 返回结果
+ *           1. 清零 info + DMA 缓冲区
+ *           2. 启动 DMA 接收 (HAL_UART_Receive_DMA)
+ *           3. 发送 "$0,0,1#" 开启模块数字量上报
+ *           4. osDelay(50ms) 等待DMA搬完一帧数据
+ *           5. 停 DMA 接收
+ *           6. 发送 "$0,0,0#" 关闭模块输出
+ *           7. 从 DMA 缓冲区解析帧数据
+ *           8. 计算偏差, 返回结果
  *         调用前车必须已停稳
  * @return GraySensor_Info_t 解析结果, read_success 指示是否成功
  */
@@ -279,33 +205,55 @@ GraySensor_Info_t GraySensor_ReadOnce(void)
 {
     GraySensor_Info_t info;
     memset(&info, 0, sizeof(info));
+    memset(s_dma_buf, 0, sizeof(s_dma_buf));
 
-    /* 1. 清空旧数据, 确保干净态 */
-    uart_flush_rx();
-
-    /* 2. 发送开启指令 */
-    if (uart_send_cmd(CMD_START) != HAL_OK) {
+    /* 1. 启动 DMA 接收 (Normal模式, 不会自动循环) */
+    HAL_StatusTypeDef dma_ret = HAL_UART_Receive_DMA(&huart6, s_dma_buf, sizeof(s_dma_buf));
+    if (dma_ret != HAL_OK) {
         info.read_success = 0;
-        g_gray_read_ok = 2;  /* 发送失败, 通知调试打印任务 */
+        g_gray_read_ok = 2;   /* DMA 启动失败 */
         return info;
     }
 
-    /* 3. 立即阻塞接收一帧并解析 (parse_frame 首个字节超时500ms, 不丢帧) */
-    if (parse_frame(&info)) {
-        /* 计算偏差和辅助标志 */
-        calc_offset(&info);
-        info.read_success = 1;
-        g_gray_read_ok = 1;  /* 读取成功, 通知调试打印任务 */
-    } else {
+    /* 2. 发送开启指令 */
+    if (uart_send_cmd(CMD_START) != HAL_OK) {
+        HAL_UART_DMAStop(&huart6);
         info.read_success = 0;
-        g_gray_read_ok = 2;  /* 解析超时/失败, 通知调试打印任务 */
+        g_gray_read_ok = 2;   /* 发送失败 */
+        return info;
     }
 
-    /* 5. 发送关闭指令, 模块停止上报 */
+    /* 3. 等待帧数据到达
+     *    115200下1帧~43字节约4ms, 50ms等待非常宽裕
+     *    模块收到指令后2~5ms开始发帧
+     *    DMA 硬件自动搬字节进 s_dma_buf, CPU 让给其他任务 */
+    osDelay(50);
+
+    /* 4. 停 DMA + 关模块 */
+    HAL_UART_DMAStop(&huart6);
     uart_send_cmd(CMD_STOP);
 
-    /* 6. 清空残留 (关闭指令后可能还有最后一帧在缓冲区) */
-    uart_flush_rx();
+    /* 5. 解析 DMA 缓冲区中的帧数据 */
+    if (parse_dma_frame(&info)) {
+        calc_offset(&info);
+        info.read_success = 1;
+        g_gray_read_ok = 1;   /* 读取成功 */
+    } else {
+        info.read_success = 0;
+        /* 诊断: 通过 USART2 打印 DMA 缓冲区前50字节 (遇到0x00就停) */
+        char hex[205];
+        int pos = 0;
+        for (uint8_t i = 0; i < 50; i++) {
+            if (s_dma_buf[i] == 0) break;
+            pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", s_dma_buf[i]);
+        }
+        if (pos > 0) {
+            snprintf(hex + pos, sizeof(hex) - pos, "\r\n");
+            HAL_UART_Transmit(&huart2, (uint8_t *)"dma rx:", 7, 10);
+            HAL_UART_Transmit(&huart2, (uint8_t *)hex, (uint16_t)strlen(hex), 100);
+        }
+        g_gray_read_ok = 3;   /* 解析失败 (超时或格式错) */
+    }
 
     return info;
 }
@@ -327,7 +275,7 @@ GraySensor_Info_t GraySensor_ReadOnce(void)
 void GraySensor_CorrectPose(void)
 {
     GraySensor_Info_t info = GraySensor_ReadOnce();
-
+     
     /* 读取失败、脱线、路口: 不矫正 */
     if (!info.read_success || !info.is_on_line || info.is_crossroad) {
         return;

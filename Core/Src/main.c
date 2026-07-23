@@ -25,8 +25,6 @@
 #include "usart.h"
 #include "usb_otg.h"
 #include "gpio.h"
-#include "motor.h"
-#include "gray_sensor.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -205,13 +203,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
   /* USER CODE END Callback 1 */
 }
-
-/**
-  * @brief  输出比较匹配中断回调 — 步进电机脉冲生成
-  * @note   由 HAL_TIM_IRQHandler 内部自动调用
-  * @param  htim : TIM handle
-  * @retval None
-  */
 
 /**
   * @brief  This function is executed in case of error occurrence.

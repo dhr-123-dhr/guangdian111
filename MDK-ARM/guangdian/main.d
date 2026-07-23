@@ -50,5 +50,3 @@ guangdian\main.o: ../Core/Inc/tim.h
 guangdian\main.o: ../Core/Inc/usart.h
 guangdian\main.o: ../Core/Inc/usb_otg.h
 guangdian\main.o: ../Core/Inc/gpio.h
-guangdian\main.o: ../Core/Inc/motor.h
-guangdian\main.o: ../Core/Inc/gray_sensor.h

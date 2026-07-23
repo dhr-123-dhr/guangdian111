@@ -40,4 +40,5 @@ guangdian\gray_sensor.o: ../Core/Inc/motor.h
 guangdian\gray_sensor.o: ../Core/Inc/trap_plan.h
 guangdian\gray_sensor.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h
 guangdian\gray_sensor.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+guangdian\gray_sensor.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
 guangdian\gray_sensor.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h

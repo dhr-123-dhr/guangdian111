@@ -10,13 +10,10 @@
  */
 
 /* 黑线检测有效电平: 1=检测到黑线输出高 */
-#define SENSOR_ACTIVE_LEVEL     1
-
-/* 串口超时 (ms) */
-#define GRAY_SENSOR_TIMEOUT_MS  500
+#define SENSOR_ACTIVE_LEVEL     0
 
 /* 矫正角度系数 (degrees per offset_unit), 3°/单位偏差 */
-#define CORRECT_FACTOR           30.0f
+#define CORRECT_FACTOR           3.0f
 
 /* ================================================================
  *  数 据 结 构
@@ -27,7 +24,7 @@
  * @brief  灰度传感器单次读取结果
  */
 typedef struct {
-    uint8_t channels[8];   /* ch[0]=x1(L4最左) ~ ch[7]=x8(R4最右), 0=白 1=黑线 */
+    uint8_t channels[8];   /* ch[0]=x1(L4最左) ~ ch[7]=x8(R4最右), 0=黑线 1=白 */
     float   offset;        /* 偏差值 -4.0 ~ +4.0 (负=偏左, 正=偏右, 0=居中) */
     uint8_t active_count;  /* 检测到黑线的通道数 */
     uint8_t is_on_line;    /* 是否检测到黑线 (≥1路触发) */
@@ -37,6 +34,9 @@ typedef struct {
 
 /* 灰度读取成功标志 (被 freertos.c 陀螺仪任务轮询打印后清零) */
 extern volatile uint8_t g_gray_read_ok;
+
+/* 最近一次灰度读取结果 (供 freertos.c 打印详情) */
+extern volatile GraySensor_Info_t g_gray_info_last;
 
 /* ================================================================
  *  公 共 接 口

@@ -20,13 +20,9 @@
 /* Includes ------------------------------------------------------------------*/
 #include "FreeRTOS.h"
 #include "task.h"
-#include "timers.h"
 #include "main.h"
 #include "cmsis_os.h"
-#include "chassis.h"
-#include "mpu6050.h"
-#include "i2c.h"
-#include "semphr.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
@@ -36,6 +32,21 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+#include "semphr.h"        // SemaphoreHandle_t, xSemaphoreCreateBinary, xSemaphoreTake
+#include "mpu6050.h"       // MPU6050_Init, MPU6050_StartReadDMA, MPU6050_IntegrateYaw, g_mpu6050_data...
+#include "chassis.h"       // Chassis_Init, Chassis_Moveto, Chassis_RotateTo, Chassis_IsMoveDone...
+
+extern I2C_HandleTypeDef hi2c1;  // I2C1 句柄 (在 i2c.c 定义)
+
+
+
+osThreadId_t gyroTaskHandle;
+static const osThreadAttr_t gyroTask_attributes = {
+    .name = "gyroTask",
+    .stack_size = 512 * 4,
+    .priority = (osPriority_t) osPriorityHigh,
+};
+static void StartGyroTask(void *argument);  // 前向声明
 
 /* USER CODE END PTD */
 
@@ -55,6 +66,15 @@ static volatile uint8_t g_chassis_initialized = 0;
 
 /* 信号量驱动架构: I2C DMA 完成信号量 */
 SemaphoreHandle_t g_i2c_dma_sem = NULL;
+
+/* 1ms 控制定时器句柄 + 属性: 驱动梯形加减速状态机 */
+osTimerId_t controlTimerHandle;
+static const osTimerAttr_t controlTimer_attributes = {
+    .name = "ControlTimer",
+    .attr_bits = 0,
+    .cb_mem = NULL,
+    .cb_size = 0,
+};
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -64,29 +84,10 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 
-/* 1ms 控制定时器句柄 */
-osTimerId_t controlTimerHandle;
-const osTimerAttr_t controlTimer_attributes = {
-  .name = "ControlTimer"
-};
-
-/* 陀螺仪任务句柄 */
-osThreadId_t gyroTaskHandle;
-const osThreadAttr_t gyroTask_attributes = {
-  .name = "gyroTask",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal,
-};
-
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-
-/* USER CODE END FunctionPrototypes */
-
-/* 1ms 控制定时器回调前向声明 (定义在下方) */
 static void ControlTimerCallback(void *argument);
-void StartGyroTask(void *argument);
-
+/* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
 
@@ -145,13 +146,6 @@ void MX_FREERTOS_Init(void) {
   * @retval None
   */
 /* USER CODE END Header_StartDefaultTask */
-/* 1ms 控制定时器回调: 更新梯形加减速状态机 */
-void ControlTimerCallback(void *argument)
-{
-  if (!g_chassis_initialized) return;
-  Chassis_Update();
-}
-
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
@@ -309,10 +303,19 @@ void StartGyroTask(void *argument)
         /* 灰度读取结果打印 */
         if (g_gray_read_ok == 1) {
           g_gray_read_ok = 0;
-          HAL_UART_Transmit(&huart2, (uint8_t *)"huidu ok\r\n", 10, 10);
+          char buf[80];
+          int p = 0;
+          for (int i = 0; i < 8; i++)
+            p += snprintf(buf+p, sizeof(buf)-p, "%d ", g_gray_info_last.channels[i]);
+          p += snprintf(buf+p, sizeof(buf)-p, "ofs=%.1f on=%d cross=%d\r\n",
+                        g_gray_info_last.offset, g_gray_info_last.is_on_line, g_gray_info_last.is_crossroad);
+          HAL_UART_Transmit(&huart2, (uint8_t*)buf, (uint16_t)p, 10);
         } else if (g_gray_read_ok == 2) {
           g_gray_read_ok = 0;
-          HAL_UART_Transmit(&huart2, (uint8_t *)"huidu fail\r\n", 12, 10);
+          HAL_UART_Transmit(&huart2, (uint8_t *)"huidu fail tx\r\n", 15, 10);
+        } else if (g_gray_read_ok == 3) {
+          g_gray_read_ok = 0;
+          HAL_UART_Transmit(&huart2, (uint8_t *)"huidu fail rx\r\n", 15, 10);
         }
       }
     }
@@ -323,4 +326,15 @@ void StartGyroTask(void *argument)
   }
 }
 
+/**
+ * @brief  1ms 控制定时器回调: 驱动梯形加减速状态机
+ *         osTimerPeriodic 每 1ms 触发, 调用 Chassis_Update()
+ */
+static void ControlTimerCallback(void *argument)
+{
+    (void)argument;
+    Chassis_Update();
+}
+
 /* USER CODE END Application */
+
