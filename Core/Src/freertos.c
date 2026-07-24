@@ -177,6 +177,7 @@ void StartDefaultTask(void *argument)
   uint8_t state_entered = 0;
   int last_state = -1;       /* 上次状态, 用于仅打印变化 */
   uint16_t rev_cnt = 0;      /* ST:4 诊断计数器 */
+  uint8_t g_next_move_compensation = 0;  /* 纠偏补偿(mm), 0=未纠偏 30=已纠偏 */
 
   for (;;)
   {
@@ -201,19 +202,22 @@ void StartDefaultTask(void *argument)
     switch (state) {
       case STATE_FORWARD_1M:
         if (!state_entered) {
-          Chassis_Moveto(500.0f-PAIN);
+          Chassis_Moveto(500.0f);
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
           osDelay(300);
-          GraySensor_CorrectPose(1);
+          /* 纠偏了则下一段补偿-30mm侧移误差 */
+          uint8_t corrected = GraySensor_CorrectPose(1);
+          g_next_move_compensation = corrected; /* 0/10/20/30 */
           state = STATE_MOVE_1000;
           state_entered = 0;
         }
         break;
       case STATE_MOVE_1000:
         if (!state_entered) {
-          Chassis_Moveto(587.0f);
+          Chassis_Moveto(587.0f - g_next_move_compensation);
+          g_next_move_compensation = 0;  /* 用完清零 */
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {
@@ -254,14 +258,16 @@ void StartDefaultTask(void *argument)
         }
         if (Chassis_IsMoveDone()) {      
           osDelay(300);
-          GraySensor_CorrectPose(1); 
+          uint8_t corrected = GraySensor_CorrectPose(1); 
+          g_next_move_compensation = corrected; /* 0/10/20/30 */
           state = STATE_MOVE_300;
           state_entered = 0;
         }
         break;
       case STATE_MOVE_300:
         if (!state_entered) {
-          Chassis_Moveto(160.0f);
+          Chassis_Moveto(160.0f - g_next_move_compensation);
+          g_next_move_compensation = 0;  /* 用完清零 */
           state_entered = 1;
         }
         if (Chassis_IsMoveDone()) {

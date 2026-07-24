@@ -272,20 +272,19 @@ GraySensor_Info_t GraySensor_ReadOnce(void)
  *         三步全为阻塞等待, 函数返回时校正已结束, 无需额外状态机
  * @param  direction  移动方向: +1=前进 5cm, -1=后退 5cm
  */
-void GraySensor_CorrectPose(int8_t direction)
+uint8_t GraySensor_CorrectPose(int8_t direction)
 {
-    int PIAN;
     GraySensor_Info_t info = GraySensor_ReadOnce();
 
     /* 读取失败、脱线、路口: 不矫正 */
     if (!info.read_success || !info.is_on_line || info.is_crossroad) {
-        return;
+        return 0;
     }
 
     /* 偏移量极小 (abs < 0.3): 认为已居中, 跳过 */
     float abs_offset = (info.offset >= 0.0f) ? info.offset : -info.offset;
     if (abs_offset < 0.3f) {
-        return;
+        return 0;
     }
 
     /* 计算矫正角度: 偏差 × 系数 (负offset=偏左, 正转右调) */
@@ -311,5 +310,11 @@ void GraySensor_CorrectPose(int8_t direction)
         osDelay(5);
     }
     osDelay(50);  /* 停稳 */
-    return PAIN;
+    /* 按纠偏幅度返回补偿值 (mm) */
+    if (abs_offset >= 2.0f)
+        return 30;
+    else if (abs_offset >= 1.0f)
+        return 20;
+    else
+        return 10;
 }

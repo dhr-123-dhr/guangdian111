@@ -3,7 +3,7 @@
 <title>Static Call Graph - [guangdian\guangdian.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image guangdian\guangdian.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060528: Last Updated: Fri Jul 24 05:28:11 2026
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060528: Last Updated: Fri Jul 24 05:53:18 2026
 <BR><P>
 <H3>Maximum Stack Usage =        488 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
@@ -1013,8 +1013,8 @@ Global Symbols
 <LI><a href="#[e7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_I2C_MspInit
 </UL>
 
-<P><STRONG><a name="[be]"></a>GraySensor_CorrectPose</STRONG> (Thumb, 192 bytes, Stack size 32 bytes, gray_sensor.o(i.GraySensor_CorrectPose))
-<BR><BR>[Stack]<UL><LI>Max Depth = 224 + Unknown Stack Size
+<P><STRONG><a name="[be]"></a>GraySensor_CorrectPose</STRONG> (Thumb, 212 bytes, Stack size 40 bytes, gray_sensor.o(i.GraySensor_CorrectPose))
+<BR><BR>[Stack]<UL><LI>Max Depth = 232 + Unknown Stack Size
 <LI>Call Chain = GraySensor_CorrectPose &rArr; GraySensor_ReadOnce &rArr; __2snprintf &rArr; _printf_char_common &rArr; __printf
 </UL>
 <BR>[Calls]<UL><LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;GraySensor_ReadOnce
@@ -1872,8 +1872,8 @@ Global Symbols
 </UL>
 <BR>[Address Reference Count : 1]<UL><LI> startup_stm32f407xx.o(RESET)
 </UL>
-<P><STRONG><a name="[67]"></a>StartDefaultTask</STRONG> (Thumb, 528 bytes, Stack size 96 bytes, freertos.o(i.StartDefaultTask))
-<BR><BR>[Stack]<UL><LI>Max Depth = 320 + Unknown Stack Size
+<P><STRONG><a name="[67]"></a>StartDefaultTask</STRONG> (Thumb, 570 bytes, Stack size 96 bytes, freertos.o(i.StartDefaultTask))
+<BR><BR>[Stack]<UL><LI>Max Depth = 328 + Unknown Stack Size
 <LI>Call Chain = StartDefaultTask &rArr; GraySensor_CorrectPose &rArr; GraySensor_ReadOnce &rArr; __2snprintf &rArr; _printf_char_common &rArr; __printf
 </UL>
 <BR>[Calls]<UL><LI><a href="#[c9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UART_Transmit

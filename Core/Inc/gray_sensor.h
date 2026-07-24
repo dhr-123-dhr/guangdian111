@@ -69,6 +69,6 @@ GraySensor_Info_t GraySensor_ReadOnce(void);
  *         三步全为阻塞等待, 函数返回时校正已结束, 无需额外状态
  * @param  direction  移动方向: +1=前进 5cm, -1=后退 5cm
  */
-void GraySensor_CorrectPose(int8_t direction);
+uint8_t GraySensor_CorrectPose(int8_t direction);
 
 #endif /* __GRAY_SENSOR_H__ */
